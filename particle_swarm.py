@@ -76,23 +76,53 @@ def get_min_distance(df, CQIs, NQIs, particle, gamma):
     return min_distance, cluster_assignment
 
 # Main function to anonymize data based on closest cluster
-def get_anonymized_data(df, CQIs, NQIs, particle, gamma):
+# def get_anonymized_data(df, CQIs, NQIs, particle, gamma):
+#     min_distance, cluster_assignment = get_min_distance(df, CQIs, NQIs, particle, gamma)
+#     df['cluster'] = cluster_assignment
+    
+#     anonymized_data = []
+#     for cluster_index in np.unique(cluster_assignment):
+#         cluster_data = df[df['cluster'] == cluster_index].copy()
+#         centroid_values = particle[cluster_index]
+        
+#         # Update numeric and categorical values with the centroid
+#         cluster_data[NQIs] = centroid_values[:len(NQIs)]
+#         cluster_data[CQIs] = centroid_values[len(NQIs):]
+        
+#         anonymized_data.append(cluster_data)
+    
+#     anonymized_data = pd.concat(anonymized_data)
+#     return anonymized_data
+
+def get_anonymized_data(df, CQIs, NQIs, particle, gamma, k_val):
     min_distance, cluster_assignment = get_min_distance(df, CQIs, NQIs, particle, gamma)
     df['cluster'] = cluster_assignment
     
     anonymized_data = []
+    violating_records = []
+
     for cluster_index in np.unique(cluster_assignment):
         cluster_data = df[df['cluster'] == cluster_index].copy()
         centroid_values = particle[cluster_index]
-        
-        # Update numeric and categorical values with the centroid
+
+        if len(cluster_data) < k_val:
+            # This cluster violates k-anonymity
+            violating_records.extend(cluster_data.index.tolist())
+
+            # Strategy: apply stronger anonymization — e.g., more general values
+            generalized_numeric = np.mean(df[NQIs], axis=0)  # could use broader generalization
+            generalized_categorical = pd.Series([df[c].mode()[0] for c in CQIs])
+            centroid_values = np.concatenate([generalized_numeric, generalized_categorical])
+
+        # Apply anonymization (even for non-violating clusters)
         cluster_data[NQIs] = centroid_values[:len(NQIs)]
         cluster_data[CQIs] = centroid_values[len(NQIs):]
-        
         anonymized_data.append(cluster_data)
-    
+
     anonymized_data = pd.concat(anonymized_data)
-    return anonymized_data
+
+    # Return both the data and the violating record indices for penalty handling
+    return anonymized_data, violating_records
 
 
 def initialize_particles(n_population, NQIs, CQIs, bounds, df, n_cluster):
@@ -219,9 +249,9 @@ def run_particle_swarm_experiment(df, models, param_combinations, NQIs, CQIs, n_
 
     for param_comb in param_combinations:
         # Unpack parameters
-        gamma, k_val, n_cluster_val, l_multi_k_val, l_multi_ML_val = param_comb
+        gamma, k_val, n_cluster_val, initial_violation_threshold, violation_decay_rate, penalty_weight = param_comb
 
-        print(f"Running with k = {k_val}, n_cluster = {n_cluster_val}, l_multi_k = {l_multi_k_val}, l_multi_ML = {l_multi_ML_val}")
+        print(f"Running with k = {k_val}, n_cluster = {n_cluster_val},  initial_violation_threshold = {initial_violation_threshold}, violation_decay_rate = {violation_decay_rate}, penalty_weight = {penalty_weight}")
 
         for name, model in models:
             print(f"Training model: {name}")
@@ -251,16 +281,21 @@ def run_particle_swarm_experiment(df, models, param_combinations, NQIs, CQIs, n_
             particles = initialize_particles(n_population, NQIs, CQIs, bounds, df, n_cluster_val)
 
             for iteration in range(maxIter):
+
                 print(f"Iteration: {iteration}")
                 iteration_info = []
 
+                # Update violation threshold
+                violation_threshold = max(initial_violation_threshold - iteration * violation_decay_rate, 0)
+
                 for i in range(n_population):
                     # Generate anonymized data
-                    anonymized_df = get_anonymized_data(df, CQIs, NQIs, particles[i], gamma)
+                    # anonymized_df = get_anonymized_data(df, CQIs, NQIs, particles[i], gamma)
+                    anonymized_df, violating_records = get_anonymized_data(df, CQIs, NQIs, particles[i], gamma, k_val)
 
                     # Check k-anonymity constraint
-                    k_anonymity = calculate_k_constraint(anonymized_df, k_val, n_cluster_val)
-                    k_violation[i] = k_anonymity['k violation']
+                    # k_anonymity = calculate_k_constraint(anonymized_df, k_val, n_cluster_val)
+                    k_violation[i] = len(violating_records)
 
                     # Encode categorical variables
                     anonymized_df_encoded = utils.encode_categorical_from_file(anonymized_df)
@@ -293,8 +328,10 @@ def run_particle_swarm_experiment(df, models, param_combinations, NQIs, CQIs, n_
                     })
 
                     # Compute objective function
-                    normalized_k_violation = utils.normalize_data(k_violation[i], 0, 500)
-                    fit[i] = l_multi_k_val * normalized_k_violation + l_multi_ML_val * avg_loss
+                    # normalized_k_violation = utils.normalize_data(k_violation[i], 0, 500)
+                    excess_violation = max(0, len(violating_records) - violation_threshold)
+                    penalty = penalty_weight * excess_violation
+                    fit[i] = avg_loss + penalty
 
                     # Update personal best
                     if fit[i] < pbest_fit[i]:
@@ -316,7 +353,7 @@ def run_particle_swarm_experiment(df, models, param_combinations, NQIs, CQIs, n_
             # Save the best anonymized dataset
             best_anonymized_df = get_anonymized_data(df, CQIs, NQIs, global_best, gamma)
 
-            filename = f"best_anonymized_df_k{k_val}_ncluster{n_cluster_val}_lmk{l_multi_k_val}_lmML{l_multi_ML_val}.csv"
+            filename = f"best_anonymized_df_k{k_val}_ncluster{n_cluster_val}.csv"
             filepath = os.path.join(filedirectory, filename)
             best_anonymized_df.to_csv(filepath, index=True)
 
