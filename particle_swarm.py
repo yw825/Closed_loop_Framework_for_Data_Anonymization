@@ -19,6 +19,8 @@ from sklearn.model_selection import GridSearchCV
 import gc
 import itertools
 from sklearn.utils import resample
+from collections import defaultdict
+
 
 from constants import *
 import utils
@@ -71,59 +73,170 @@ def get_total_distance(df, CQIs, NQIs, particle, gamma):
 # Function to get the minimum distance and cluster assignment
 def get_min_distance(df, CQIs, NQIs, particle, gamma):
     total_distance = get_total_distance(df, CQIs, NQIs, particle, gamma)
-    min_distance = np.min(total_distance, axis=1)
+    # min_distance = np.min(total_distance, axis=1)
     cluster_assignment = np.argmin(total_distance, axis=1)
-    return min_distance, cluster_assignment
+    return cluster_assignment # min_distance
 
-# Main function to anonymize data based on closest cluster
-# def get_anonymized_data(df, CQIs, NQIs, particle, gamma):
-#     min_distance, cluster_assignment = get_min_distance(df, CQIs, NQIs, particle, gamma)
+
+# def get_anonymized_data(df, CQIs, NQIs, particle, gamma, k_val):
+#     cluster_assignment = get_min_distance(df, CQIs, NQIs, particle, gamma)
 #     df['cluster'] = cluster_assignment
     
 #     anonymized_data = []
+#     violating_records = []
+
 #     for cluster_index in np.unique(cluster_assignment):
 #         cluster_data = df[df['cluster'] == cluster_index].copy()
 #         centroid_values = particle[cluster_index]
-        
-#         # Update numeric and categorical values with the centroid
+
+#         if len(cluster_data) < k_val:
+#             # This cluster violates k-anonymity
+#             violating_records.extend(cluster_data.index.tolist())
+
+#         # Apply anonymization (even for non-violating clusters)
 #         cluster_data[NQIs] = centroid_values[:len(NQIs)]
 #         cluster_data[CQIs] = centroid_values[len(NQIs):]
-        
 #         anonymized_data.append(cluster_data)
-    
-#     anonymized_data = pd.concat(anonymized_data)
-#     return anonymized_data
 
-def get_anonymized_data(df, CQIs, NQIs, particle, gamma, k_val):
-    min_distance, cluster_assignment = get_min_distance(df, CQIs, NQIs, particle, gamma)
-    df['cluster'] = cluster_assignment
-    
-    anonymized_data = []
+#     anonymized_data = pd.concat(anonymized_data)
+
+#     # Return both the data and the violating record indices for penalty handling
+#     return anonymized_data, violating_records
+
+# def calculate_k_constraint(anonymized_df, k, n_cluster):
+
+#     # Count the number of records per cluster
+#     num_records_per_cluster = anonymized_df['cluster'].value_counts()
+
+#     # Identify clusters that violate the k constraint
+#     violating_clusters = num_records_per_cluster[num_records_per_cluster < k]
+
+#     # Calculate the total number of k-violations (sum the deficits)
+#     total_k_violation = np.sum(k - violating_clusters)
+
+#     return {
+#         "k violation": total_k_violation,
+#         "violating clusters": violating_clusters
+#     }
+
+def classify_clusters(df, k_val):
+    clusters = df.groupby('cluster')
+    valid_clusters = {}
+    violated_clusters = {}
+
+    for cluster_index, cluster_data in clusters:
+        if len(cluster_data) >= k_val:
+            valid_clusters[cluster_index] = cluster_data
+        else:
+            violated_clusters[cluster_index] = cluster_data
+
+    return valid_clusters, violated_clusters
+
+def split_valid_clusters(valid_clusters, k_val):
+    retained_records = []
+    excess_pool = []
+
+    for idx, cluster_data in valid_clusters.items():
+        retained = cluster_data.sample(n=k_val, random_state=42)
+        excess = cluster_data.drop(retained.index)
+
+        retained_records.append(retained)
+        excess_pool.append(excess)
+
+    return pd.concat(retained_records), pd.concat(excess_pool)
+
+def fix_violated_clusters(violated_clusters, excess_pool, k_val):
+    fixed_clusters = []
     violating_records = []
 
-    for cluster_index in np.unique(cluster_assignment):
-        cluster_data = df[df['cluster'] == cluster_index].copy()
-        centroid_values = particle[cluster_index]
+    for idx, cluster_data in violated_clusters.items():
+        n_missing = k_val - len(cluster_data)
 
-        if len(cluster_data) < k_val:
-            # This cluster violates k-anonymity
+        if len(excess_pool) >= n_missing:
+            additional = excess_pool.sample(n=n_missing, random_state=42)
+            excess_pool = excess_pool.drop(additional.index)
+
+            # Set the cluster ID of additional records to match the violated cluster
+            additional = additional.copy()
+            additional['cluster'] = idx
+
+            new_cluster = pd.concat([cluster_data, additional])
+        else:
+            # Not enough records to fix the cluster — flag it
+            new_cluster = cluster_data
             violating_records.extend(cluster_data.index.tolist())
 
-            # Strategy: apply stronger anonymization — e.g., more general values
-            generalized_numeric = np.mean(df[NQIs], axis=0)  # could use broader generalization
-            generalized_categorical = pd.Series([df[c].mode()[0] for c in CQIs])
-            centroid_values = np.concatenate([generalized_numeric, generalized_categorical])
+        # Ensure all records in the cluster have the correct cluster ID
+        new_cluster['cluster'] = idx
+        fixed_clusters.append(new_cluster)
 
-        # Apply anonymization (even for non-violating clusters)
+    return pd.concat(fixed_clusters), excess_pool, violating_records
+
+def apply_centroids(df, particle, CQIs, NQIs):
+    anonymized_data = []
+    for cluster_index in df['cluster'].unique():
+        cluster_data = df[df['cluster'] == cluster_index].copy()
+        centroid_values = particle[cluster_index]
         cluster_data[NQIs] = centroid_values[:len(NQIs)]
         cluster_data[CQIs] = centroid_values[len(NQIs):]
         anonymized_data.append(cluster_data)
+    return pd.concat(anonymized_data)
 
-    anonymized_data = pd.concat(anonymized_data)
+# def get_adaptive_anonymized_data(df, CQIs, NQIs, particle, gamma, k_val):
+#     cluster_assignment = get_min_distance(df, CQIs, NQIs, particle, gamma)
+#     df = df.copy()
+#     df['cluster'] = cluster_assignment
 
-    # Return both the data and the violating record indices for penalty handling
-    return anonymized_data, violating_records
+#     # Split into valid and violated
+#     valid_clusters, violated_clusters = classify_clusters(df, k_val)
 
+#     # Keep k from each valid cluster, redistribute extra
+#     retained, excess_pool = split_valid_clusters(valid_clusters, k_val)
+
+#     # Fix violated clusters using pooled extras
+#     fixed, remaining_pool, violating_records = fix_violated_clusters(violated_clusters, excess_pool, k_val)
+
+#     # Combine all records to anonymize
+#     final_df = pd.concat([retained, fixed, remaining_pool])
+    
+#     # Apply centroids
+#     anonymized_df = apply_centroids(final_df, particle, CQIs, NQIs)
+
+#     return anonymized_df, violating_records
+
+def get_adaptive_anonymized_data(df, CQIs, NQIs, particle, gamma, k_val):
+    tracking_info = {}
+
+    # Assign clusters using min distance
+    cluster_assignment = get_min_distance(df, CQIs, NQIs, particle, gamma)
+    df = df.copy()
+    df['cluster'] = cluster_assignment
+
+    tracking_info["num_clusters"] = len(np.unique(cluster_assignment))
+
+    # Split into valid and violated clusters
+    valid_clusters, violated_clusters = classify_clusters(df, k_val)
+    tracking_info["num_valid_clusters"] = len(valid_clusters)
+    tracking_info["num_violated_clusters"] = len(violated_clusters)
+
+    # Retain k from each valid cluster
+    retained, excess_pool = split_valid_clusters(valid_clusters, k_val)
+    tracking_info["num_retained_records"] = len(retained)
+    tracking_info["num_excess_records"] = len(excess_pool)
+
+    # Fix violated clusters using excess pool
+    fixed, remaining_pool, violating_records = fix_violated_clusters(violated_clusters, excess_pool, k_val)
+    tracking_info["num_fixed_clusters"] = len(fixed['cluster'].unique())
+    tracking_info["num_used_excess"] = tracking_info["num_excess_records"] - len(remaining_pool)
+    tracking_info["num_remaining_excess"] = len(remaining_pool)
+    tracking_info["num_unfixed_clusters"] = tracking_info["num_violated_clusters"] - tracking_info["num_fixed_clusters"]
+    tracking_info["num_total_violating_records"] = len(violating_records)
+
+    # Combine everything before anonymizing
+    final_df = pd.concat([retained, fixed, remaining_pool])
+    anonymized_df = apply_centroids(final_df, particle, CQIs, NQIs)
+
+    return anonymized_df, violating_records, tracking_info
 
 def initialize_particles(n_population, NQIs, CQIs, bounds, df, n_cluster):
 
@@ -145,26 +258,6 @@ def initialize_particles(n_population, NQIs, CQIs, bounds, df, n_cluster):
         particles[:, :, len(NQIs) + i] = np.random.choice(unique_values, size=(n_population, n_cluster))
 
     return particles
-
-
-
-def calculate_k_constraint(anonymized_df, k, n_cluster):
-
-    # Count the number of records per cluster
-    num_records_per_cluster = anonymized_df['cluster'].value_counts()
-
-    # Identify clusters that violate the k constraint
-    violating_clusters = num_records_per_cluster[num_records_per_cluster < k]
-
-    # Calculate the total number of k-violations (sum the deficits)
-    total_k_violation = np.sum(k - violating_clusters)
-
-    return {
-        "k violation": total_k_violation,
-        "violating clusters": violating_clusters
-    }
-
-
 
 def update_categorical_variables(particle_categorical, CQIs, centv, levels):
 
@@ -291,7 +384,8 @@ def run_particle_swarm_experiment(df, models, param_combinations, NQIs, CQIs, n_
                 for i in range(n_population):
                     # Generate anonymized data
                     # anonymized_df = get_anonymized_data(df, CQIs, NQIs, particles[i], gamma)
-                    anonymized_df, violating_records = get_anonymized_data(df, CQIs, NQIs, particles[i], gamma, k_val)
+                    anonymized_df, violating_records, tracking_info = get_adaptive_anonymized_data(df, CQIs, NQIs, particles[i], gamma, k_val)
+                    # print(violating_records)
 
                     # Check k-anonymity constraint
                     # k_anonymity = calculate_k_constraint(anonymized_df, k_val, n_cluster_val)
@@ -317,14 +411,14 @@ def run_particle_swarm_experiment(df, models, param_combinations, NQIs, CQIs, n_
                         "ML model": name,
                         "Iteration": iteration,
                         "Particle": i,
-                        "k violation": k_violation[i],
                         "Accuracy": avg_accuracy,
                         "Precision": avg_precision,
                         "Recall": avg_recall,
                         "F1 score": avg_f1_score,
                         "AUC": avg_auc,
                         "Entropy-Loss": avg_loss,
-                        "Confusion matrix": avg_cm
+                        "Confusion matrix": avg_cm,
+                        **tracking_info 
                     })
 
                     # Compute objective function
@@ -351,7 +445,7 @@ def run_particle_swarm_experiment(df, models, param_combinations, NQIs, CQIs, n_
                 )
 
             # Save the best anonymized dataset
-            best_anonymized_df = get_anonymized_data(df, CQIs, NQIs, global_best, gamma)
+            best_anonymized_df = get_adaptive_anonymized_data(df, CQIs, NQIs, global_best, gamma, k_val)[0]
 
             filename = f"best_anonymized_df_k{k_val}_ncluster{n_cluster_val}.csv"
             filepath = os.path.join(filedirectory, filename)
