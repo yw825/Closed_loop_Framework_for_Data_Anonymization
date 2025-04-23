@@ -149,6 +149,66 @@ def normalize_data(value, min_value, max_value):
 
 
 
+# def convert_results_df(results_df):
+#     results = []
+
+#     for row_idx in range(results_df.shape[0]):  # Iterate over rows
+#         row_results = []
+        
+#         for col_idx in range(results_df.shape[1]):  # Iterate over columns
+#             cell = results_df.iloc[row_idx, col_idx]
+            
+#             # Step 1: Split and clean the data
+#             mappings = cell.replace('{', '').replace('}', '').split(',')
+
+#             # Step 2: Fix split confusion matrix values
+#             fixed_mappings = []
+#             inside_conf_matrix = False
+#             conf_matrix_parts = []
+
+#             for item in mappings:
+#                 item = item.strip()
+                
+#                 if "Confusion matrix" in item:  
+#                     # Start collecting confusion matrix values
+#                     inside_conf_matrix = True
+#                     conf_matrix_parts.append(item)
+#                 elif inside_conf_matrix:
+#                     # Collect the remaining parts of the confusion matrix
+#                     conf_matrix_parts.append(item)
+#                     if "]]" in item:  # End of confusion matrix
+#                         inside_conf_matrix = False
+#                         fixed_mappings.append(" ".join(conf_matrix_parts))  # Join into a single entry
+#                         conf_matrix_parts = []
+#                 else:
+#                     fixed_mappings.append(item)  # Regular key-value pairs
+
+#             # Step 3: Convert fixed mappings into a dictionary
+#             parsed_dict = {}
+#             for pair in fixed_mappings:
+#                 key, value = pair.split(":", 1)
+#                 key = key.strip().strip("'")  # Remove any extra quotes/spaces
+#                 value = value.strip()
+
+#                 # Convert numerical values
+#                 if value.startswith("np.float64("):
+#                     value = float(value.replace("np.float64(", "").replace(")", ""))
+#                 elif "array([" in value:
+#                     # Extract confusion matrix values
+#                     numbers = re.findall(r"[-+]?\d*\.\d+|\d+", value)
+#                     numbers = list(map(float, numbers))
+#                     size = int(len(numbers) / 2)  # Assuming a 2x2 matrix
+#                     value = np.array(numbers).reshape(size, 2)
+                
+#                 parsed_dict[key] = value
+
+#             row_results.append(parsed_dict)
+        
+#         results.append(row_results)
+
+#     return results
+
+
 def convert_results_df(results_df):
     results = []
 
@@ -170,36 +230,41 @@ def convert_results_df(results_df):
                 item = item.strip()
                 
                 if "Confusion matrix" in item:  
-                    # Start collecting confusion matrix values
                     inside_conf_matrix = True
                     conf_matrix_parts.append(item)
                 elif inside_conf_matrix:
-                    # Collect the remaining parts of the confusion matrix
                     conf_matrix_parts.append(item)
-                    if "]]" in item:  # End of confusion matrix
+                    if "]]" in item:
                         inside_conf_matrix = False
-                        fixed_mappings.append(" ".join(conf_matrix_parts))  # Join into a single entry
+                        fixed_mappings.append(" ".join(conf_matrix_parts))
                         conf_matrix_parts = []
                 else:
-                    fixed_mappings.append(item)  # Regular key-value pairs
+                    fixed_mappings.append(item)
 
             # Step 3: Convert fixed mappings into a dictionary
             parsed_dict = {}
             for pair in fixed_mappings:
+                if ':' not in pair:
+                    continue  # Skip bad splits
                 key, value = pair.split(":", 1)
-                key = key.strip().strip("'")  # Remove any extra quotes/spaces
+                key = key.strip().strip("'")
                 value = value.strip()
 
                 # Convert numerical values
                 if value.startswith("np.float64("):
                     value = float(value.replace("np.float64(", "").replace(")", ""))
                 elif "array([" in value:
-                    # Extract confusion matrix values
                     numbers = re.findall(r"[-+]?\d*\.\d+|\d+", value)
                     numbers = list(map(float, numbers))
-                    size = int(len(numbers) / 2)  # Assuming a 2x2 matrix
+                    size = int(len(numbers) / 2)
                     value = np.array(numbers).reshape(size, 2)
-                
+                else:
+                    # Try to cast to float if it's a normal number
+                    try:
+                        value = float(value)
+                    except ValueError:
+                        pass  # If it fails, leave it as string (e.g., labels)
+
                 parsed_dict[key] = value
 
             row_results.append(parsed_dict)

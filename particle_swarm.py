@@ -218,6 +218,7 @@ def get_adaptive_anonymized_data(df, CQIs, NQIs, particle, gamma, k_val):
     valid_clusters, violated_clusters = classify_clusters(df, k_val)
     tracking_info["num_valid_clusters"] = len(valid_clusters)
     tracking_info["num_violated_clusters"] = len(violated_clusters)
+    tracking_info["num_violating_records_before_adjsuting"] = sum(len(cluster) for cluster in violated_clusters.values())
 
     # Retain k from each valid cluster
     retained, excess_pool = split_valid_clusters(valid_clusters, k_val)
@@ -230,7 +231,7 @@ def get_adaptive_anonymized_data(df, CQIs, NQIs, particle, gamma, k_val):
     tracking_info["num_used_excess"] = tracking_info["num_excess_records"] - len(remaining_pool)
     tracking_info["num_remaining_excess"] = len(remaining_pool)
     tracking_info["num_unfixed_clusters"] = tracking_info["num_violated_clusters"] - tracking_info["num_fixed_clusters"]
-    tracking_info["num_total_violating_records"] = len(violating_records)
+    tracking_info["num_total_violating_records_after_adjsuting"] = len(violating_records)
 
     # Combine everything before anonymizing
     final_df = pd.concat([retained, fixed, remaining_pool])
@@ -449,7 +450,7 @@ def run_particle_swarm_experiment(df, models, param_combinations, NQIs, CQIs, n_
 
             filename = f"best_anonymized_df_k{k_val}_ncluster{n_cluster_val}.csv"
             filepath = os.path.join(filedirectory, filename)
-            best_anonymized_df.to_csv(filepath, index=True)
+            best_anonymized_df.to_csv(filepath, index=False)
 
             print(f"Saved the best anonymized data to {filepath}")
 
