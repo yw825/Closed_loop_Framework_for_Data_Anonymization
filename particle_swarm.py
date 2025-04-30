@@ -364,7 +364,10 @@ def run_particle_swarm_experiment(df, models, param_combinations, NQIs, CQIs, n_
             f1_score = np.zeros(n_population)
             auc_score = np.zeros(n_population)
             loss_score = np.zeros(n_population)
-            confusion_matrix = np.zeros((n_population, 2, 2))
+            tp_score = np.zeros(n_population)
+            tn_score = np.zeros(n_population)
+            fp_score = np.zeros(n_population)
+            fn_score = np.zeros(n_population)
 
             # Initialize best solutions
             global_best_fit = float('inf')
@@ -396,29 +399,35 @@ def run_particle_swarm_experiment(df, models, param_combinations, NQIs, CQIs, n_
                     anonymized_df_encoded = utils.encode_categorical_from_file(anonymized_df)
 
                     # Train ML model and get evaluation metrics
-                    avg_accuracy, avg_precision, avg_recall, avg_f1_score, avg_auc, avg_loss, avg_cm = model_train.train_model_bootstrap(
-                        anonymized_df_encoded, model, n_bootstrap
+                    accuracies, precisions, recalls, f1_scores, aucs, losses, tps, tns, fps, fns = model_train.train_model_bootstrap(
+                        anonymized_df_encoded, name, model, n_bootstrap
                     )
 
-                    accuracy_score[i] = avg_accuracy
-                    precision_score[i] = avg_precision
-                    recall_score[i] = avg_recall
-                    f1_score[i] = avg_f1_score
-                    auc_score[i] = avg_auc
-                    loss_score[i] = avg_loss
-                    confusion_matrix[i] = avg_cm
+                    accuracy_score[i] = accuracies
+                    precision_score[i] = precisions
+                    recall_score[i] = recalls
+                    f1_score[i] = f1_scores
+                    auc_score[i] = aucs
+                    loss_score[i] = losses
+                    tp_score[i] = tps
+                    tn_score[i] = tns
+                    fp_score[i] = fps
+                    fn_score[i] = fns
 
                     iteration_info.append({
                         "ML model": name,
                         "Iteration": iteration,
                         "Particle": i,
-                        "Accuracy": avg_accuracy,
-                        "Precision": avg_precision,
-                        "Recall": avg_recall,
-                        "F1 score": avg_f1_score,
-                        "AUC": avg_auc,
-                        "Entropy-Loss": avg_loss,
-                        "Confusion matrix": avg_cm,
+                        "Accuracy": accuracy_score[i],
+                        "Precision": precision_score[i],
+                        "Recall": recall_score[i],
+                        "F1 score": f1_score[i],
+                        "AUC": auc_score[i],
+                        "Entropy-Loss": loss_score[i],
+                        "TP": tp_score[i],
+                        "TN": tn_score[i],
+                        "FP": fp_score[i],
+                        "FN": fn_score[i],
                         **tracking_info 
                     })
 
@@ -426,7 +435,7 @@ def run_particle_swarm_experiment(df, models, param_combinations, NQIs, CQIs, n_
                     # normalized_k_violation = utils.normalize_data(k_violation[i], 0, 500)
                     excess_violation = max(0, len(violating_records) - violation_threshold)
                     penalty = penalty_weight * excess_violation
-                    fit[i] = avg_loss + penalty
+                    fit[i] = np.mean(losses) + penalty
 
                     # Update personal best
                     if fit[i] < pbest_fit[i]:
