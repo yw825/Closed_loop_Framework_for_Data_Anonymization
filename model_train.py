@@ -21,6 +21,7 @@ from sklearn.utils import resample
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix, log_loss, hinge_loss
 )
+from sklearn.dummy import DummyClassifier
 
 from constants import *
 
@@ -30,7 +31,7 @@ def train_model_bootstrap(df, name, model, n_bootstrap, test_size=0.2):
     #     columns_to_drop = ['SepsisFlag', 't_0.05', 't_0.075', 't_0.1', 'HomogeneityAttack']
     # else:
     #     columns_to_drop = ['SepsisFlag', 't_0.05', 't_0.075', 't_0.1', 'HomogeneityAttack', 'cluster']
-
+    # columns_to_drop = ['SepsisFlag', 'PatientIdentifier']
 
     # # Adult data
     # if df.shape[1] == 97:
@@ -105,4 +106,46 @@ def train_model_bootstrap(df, name, model, n_bootstrap, test_size=0.2):
 
     return accuracies, precisions, recalls, f1_scores, aucs, losses, tps, tns, fps, fns
 
+
+def get_model_standard(df, n_bootstrap, test_size=0.2):
+    # # Sepsis data
+    # if df.shape[1] == 120:
+    #     columns_to_drop = ['SepsisFlag', 't_0.05', 't_0.075', 't_0.1', 'HomogeneityAttack']
+    # else:
+    #     columns_to_drop = ['SepsisFlag', 't_0.05', 't_0.075', 't_0.1', 'HomogeneityAttack', 'cluster']
+    columns_to_drop = ['SepsisFlag', 'PatientIdentifier']
+
+    # # Adult data
+    # if df.shape[1] == 97:
+    #     columns_to_drop = ['income_ >50K']
+    # else:
+    #     columns_to_drop = ['income_ >50K', 'cluster']
+
+    # # German credit data
+    # if df.shape[1] == 49:
+    #     columns_to_drop = ['credit_risk_good']
+    # else:
+    #     columns_to_drop = ['credit_risk_good', 'cluster']
+    
+    # Prepare data
+    X = df.drop(columns=columns_to_drop)
+    y = df["SepsisFlag"]
+    # y = df["income_ >50K"]
+    # y = df["credit_risk_good"]
+
+    baseline_loss = []
+    for i in range(n_bootstrap):
+        # Train-test split
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=i)
+
+        # Train model
+        dummy = DummyClassifier(strategy='most_frequent')
+        dummy.fit(X_train, y_train)
+
+        baseline_probs = dummy.predict_proba(X_test)
+        baseline_loss.append(log_loss(y_test, baseline_probs))
+
+    good_loss = np.mean(baseline_loss) * 0.9
+
+    return good_loss
 

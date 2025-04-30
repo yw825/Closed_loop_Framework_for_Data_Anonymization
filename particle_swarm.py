@@ -447,7 +447,8 @@ def run_particle_swarm_experiment(df, models, param_combinations, NQIs, CQIs, n_
                     # normalized_k_violation = utils.normalize_data(k_violation[i], 0, 500)
                     excess_violation = max(0, len(violating_records) - violation_threshold)
                     penalty = penalty_weight * excess_violation
-                    fit[i] = np.mean(losses) + penalty
+                    fit[i] = np.max(loss_score[i]) + penalty
+                    # fit[i] = np.mean(loss_score[i]) + penalty
 
                     # Update personal best
                     if fit[i] < pbest_fit[i]:

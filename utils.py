@@ -150,8 +150,12 @@ def normalize_data(value, min_value, max_value):
 
 
 def clean_and_parse_cell(cell):
+
+    # Remove newlines for consistency
+    cell = cell.replace('\n', ' ').replace('\r', ' ')
+
     # Replace NumPy array with just the numbers inside the brackets
-    cell = re.sub(r'array\((\[.*?\])\)', r'\1', cell)
+    cell = re.sub(r'array\((\[.*?\])\)', r'\1', cell, flags=re.DOTALL)
 
     # Replace np.float64(...) with float
     cell = re.sub(r'np\.float64\((.*?)\)', r'\1', cell)
@@ -177,7 +181,7 @@ def convert_results_df(results_df):
     return parsed_results
 
 
-def plot_metric_trend_with_mean(results_df, metric_column, y_label, smooth_method='moving_avg', window_size=5, y_range=None):
+def plot_metric_trend_for_each_particle(results_df, metric_column, y_label, smooth_method='moving_avg', window_size=5, y_range=None):
     results = convert_results_df(results_df)  # Convert results
 
     plt.figure(figsize=(50, 20))  # Adjust figure size
@@ -185,7 +189,8 @@ def plot_metric_trend_with_mean(results_df, metric_column, y_label, smooth_metho
     all_res = []  # Store all particle values per iteration
 
     for j in range(len(results[0])):  # Iterate over particles
-        res = [np.mean(results[i][j][metric_column]) for i in range(len(results))]  # Extract metric values
+        # res = [np.mean(results[i][j][metric_column]) for i in range(len(results))]  # Extract metric values
+        res = [np.max(results[i][j][metric_column]) for i in range(len(results))]
         all_res.append(res)
         plt.plot(res, alpha=0.6, linewidth=0.5)  # Plot all particles
 
@@ -225,7 +230,8 @@ def plot_global_best_trend(results_df, metric_column, y_label):
 
     plt.figure(figsize=(50, 20))  # Adjust figure size
 
-    best_res = [min([np.mean(results[i][j][metric_column]) for j in range(len(results[i]))]) for i in range(len(results))]  # Extract best metric values
+    # best_res = [min([np.mean(results[i][j][metric_column]) for j in range(len(results[i]))]) for i in range(len(results))]  # Extract best metric values
+    best_res = [min([np.max(results[i][j][metric_column]) for j in range(len(results[i]))]) for i in range(len(results))]  # Extract best metric values
     
     # smooth_trend = pd.Series(best_res).rolling(window=5, center=True).mean()
 
@@ -244,7 +250,8 @@ def plot_global_best_so_far(results_df, metric_column, y_label):
 
     plt.figure(figsize=(50, 20))  # Adjust figure size
 
-    best_res = [min([np.mean(results[i][j][metric_column]) for j in range(len(results[i]))]) for i in range(len(results))]  # Extract best metric values
+    # best_res = [min([np.mean(results[i][j][metric_column]) for j in range(len(results[i]))]) for i in range(len(results))]  # Extract best metric values
+    best_res = [min([np.max(results[i][j][metric_column]) for j in range(len(results[i]))]) for i in range(len(results))]  # Extract best metric values
 
     # Compute the global best found so far
     global_best_so_far = [best_res[0]]  # Initialize with the first value
