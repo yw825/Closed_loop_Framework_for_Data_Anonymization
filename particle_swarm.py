@@ -145,9 +145,39 @@ def split_valid_clusters(valid_clusters, k_val):
 
     return pd.concat(retained_records), pd.concat(excess_pool)
 
+# def fix_violated_clusters(violated_clusters, excess_pool, k_val):
+#     fixed_clusters = []
+#     violating_records = []
+
+#     for idx, cluster_data in violated_clusters.items():
+#         n_missing = k_val - len(cluster_data)
+
+#         if len(excess_pool) >= n_missing:
+#             additional = excess_pool.sample(n=n_missing, random_state=42)
+#             excess_pool = excess_pool.drop(additional.index)
+
+#             # Set the cluster ID of additional records to match the violated cluster
+#             additional = additional.copy()
+#             additional['cluster'] = idx
+
+#             new_cluster = pd.concat([cluster_data, additional])
+#         else:
+#             # Not enough records to fix the cluster — flag it
+#             new_cluster = cluster_data
+#             violating_records.extend(cluster_data.index.tolist())
+
+#         # Ensure all records in the cluster have the correct cluster ID
+#         new_cluster['cluster'] = idx
+#         fixed_clusters.append(new_cluster)
+
+#     return pd.concat(fixed_clusters), excess_pool, violating_records
+
 def fix_violated_clusters(violated_clusters, excess_pool, k_val):
     fixed_clusters = []
     violating_records = []
+
+    if not violated_clusters:
+        return pd.DataFrame(), excess_pool, violating_records  # Nothing to fix
 
     for idx, cluster_data in violated_clusters.items():
         n_missing = k_val - len(cluster_data)
@@ -162,15 +192,14 @@ def fix_violated_clusters(violated_clusters, excess_pool, k_val):
 
             new_cluster = pd.concat([cluster_data, additional])
         else:
-            # Not enough records to fix the cluster — flag it
             new_cluster = cluster_data
             violating_records.extend(cluster_data.index.tolist())
 
-        # Ensure all records in the cluster have the correct cluster ID
         new_cluster['cluster'] = idx
         fixed_clusters.append(new_cluster)
 
     return pd.concat(fixed_clusters), excess_pool, violating_records
+
 
 def apply_centroids(df, particle, CQIs, NQIs):
     anonymized_data = []
@@ -182,27 +211,6 @@ def apply_centroids(df, particle, CQIs, NQIs):
         anonymized_data.append(cluster_data)
     return pd.concat(anonymized_data)
 
-# def get_adaptive_anonymized_data(df, CQIs, NQIs, particle, gamma, k_val):
-#     cluster_assignment = get_min_distance(df, CQIs, NQIs, particle, gamma)
-#     df = df.copy()
-#     df['cluster'] = cluster_assignment
-
-#     # Split into valid and violated
-#     valid_clusters, violated_clusters = classify_clusters(df, k_val)
-
-#     # Keep k from each valid cluster, redistribute extra
-#     retained, excess_pool = split_valid_clusters(valid_clusters, k_val)
-
-#     # Fix violated clusters using pooled extras
-#     fixed, remaining_pool, violating_records = fix_violated_clusters(violated_clusters, excess_pool, k_val)
-
-#     # Combine all records to anonymize
-#     final_df = pd.concat([retained, fixed, remaining_pool])
-    
-#     # Apply centroids
-#     anonymized_df = apply_centroids(final_df, particle, CQIs, NQIs)
-
-#     return anonymized_df, violating_records
 
 def get_adaptive_anonymized_data(df, CQIs, NQIs, particle, gamma, k_val):
     tracking_info = {}
@@ -227,7 +235,10 @@ def get_adaptive_anonymized_data(df, CQIs, NQIs, particle, gamma, k_val):
 
     # Fix violated clusters using excess pool
     fixed, remaining_pool, violating_records = fix_violated_clusters(violated_clusters, excess_pool, k_val)
-    tracking_info["num_fixed_clusters"] = len(fixed['cluster'].unique())
+    if fixed is not None and not fixed.empty:
+        tracking_info["num_fixed_clusters"] = len(fixed['cluster'].unique())
+    else:
+        tracking_info["num_fixed_clusters"] = 0
     tracking_info["num_used_excess"] = tracking_info["num_excess_records"] - len(remaining_pool)
     tracking_info["num_remaining_excess"] = len(remaining_pool)
     tracking_info["num_unfixed_clusters"] = tracking_info["num_violated_clusters"] - tracking_info["num_fixed_clusters"]
@@ -238,6 +249,7 @@ def get_adaptive_anonymized_data(df, CQIs, NQIs, particle, gamma, k_val):
     anonymized_df = apply_centroids(final_df, particle, CQIs, NQIs)
 
     return anonymized_df, violating_records, tracking_info
+
 
 def initialize_particles(n_population, NQIs, CQIs, bounds, df, n_cluster):
 
@@ -358,16 +370,16 @@ def run_particle_swarm_experiment(df, models, param_combinations, NQIs, CQIs, n_
             fit = np.zeros(n_population)
             k_violation = np.zeros(n_population)
 
-            accuracy_score = np.zeros(n_population)
-            precision_score = np.zeros(n_population)
-            recall_score = np.zeros(n_population)
-            f1_score = np.zeros(n_population)
-            auc_score = np.zeros(n_population)
-            loss_score = np.zeros(n_population)
-            tp_score = np.zeros(n_population)
-            tn_score = np.zeros(n_population)
-            fp_score = np.zeros(n_population)
-            fn_score = np.zeros(n_population)
+            accuracy_score = np.zeros((n_population, n_bootstrap))
+            precision_score = np.zeros((n_population, n_bootstrap))
+            recall_score = np.zeros((n_population, n_bootstrap))
+            f1_score = np.zeros((n_population, n_bootstrap))
+            auc_score = np.zeros((n_population, n_bootstrap))
+            loss_score = np.zeros((n_population, n_bootstrap))
+            tp_score = np.zeros((n_population, n_bootstrap))
+            tn_score = np.zeros((n_population, n_bootstrap))
+            fp_score = np.zeros((n_population, n_bootstrap))
+            fn_score = np.zeros((n_population, n_bootstrap))
 
             # Initialize best solutions
             global_best_fit = float('inf')
@@ -467,7 +479,12 @@ def run_particle_swarm_experiment(df, models, param_combinations, NQIs, CQIs, n_
 
             # Clean up memory
             del particles, centv, fit, k_violation, pbest, pbest_fit, global_best_fit, global_best
-            del accuracy_score, precision_score, recall_score, f1_score, auc_score, confusion_matrix
+            del accuracy_score, precision_score, recall_score, f1_score, auc_score, loss_score, tp_score, tn_score, fp_score, fn_score
+            # del anonymized_df, anonymized_df_encoded
+            # del iteration_info, results
+            # del best_anonymized_df
+            # del filename, filepath
+            # Run garbage collection to free up memory
             gc.collect()
 
     return results # all_results

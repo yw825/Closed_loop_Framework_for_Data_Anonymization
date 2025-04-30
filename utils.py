@@ -149,129 +149,32 @@ def normalize_data(value, min_value, max_value):
 
 
 
-# def convert_results_df(results_df):
-#     results = []
+def clean_and_parse_cell(cell):
+    # Replace NumPy array with just the numbers inside the brackets
+    cell = re.sub(r'array\((\[.*?\])\)', r'\1', cell)
 
-#     for row_idx in range(results_df.shape[0]):  # Iterate over rows
-#         row_results = []
-        
-#         for col_idx in range(results_df.shape[1]):  # Iterate over columns
-#             cell = results_df.iloc[row_idx, col_idx]
-            
-#             # Step 1: Split and clean the data
-#             mappings = cell.replace('{', '').replace('}', '').split(',')
+    # Replace np.float64(...) with float
+    cell = re.sub(r'np\.float64\((.*?)\)', r'\1', cell)
 
-#             # Step 2: Fix split confusion matrix values
-#             fixed_mappings = []
-#             inside_conf_matrix = False
-#             conf_matrix_parts = []
-
-#             for item in mappings:
-#                 item = item.strip()
-                
-#                 if "Confusion matrix" in item:  
-#                     # Start collecting confusion matrix values
-#                     inside_conf_matrix = True
-#                     conf_matrix_parts.append(item)
-#                 elif inside_conf_matrix:
-#                     # Collect the remaining parts of the confusion matrix
-#                     conf_matrix_parts.append(item)
-#                     if "]]" in item:  # End of confusion matrix
-#                         inside_conf_matrix = False
-#                         fixed_mappings.append(" ".join(conf_matrix_parts))  # Join into a single entry
-#                         conf_matrix_parts = []
-#                 else:
-#                     fixed_mappings.append(item)  # Regular key-value pairs
-
-#             # Step 3: Convert fixed mappings into a dictionary
-#             parsed_dict = {}
-#             for pair in fixed_mappings:
-#                 key, value = pair.split(":", 1)
-#                 key = key.strip().strip("'")  # Remove any extra quotes/spaces
-#                 value = value.strip()
-
-#                 # Convert numerical values
-#                 if value.startswith("np.float64("):
-#                     value = float(value.replace("np.float64(", "").replace(")", ""))
-#                 elif "array([" in value:
-#                     # Extract confusion matrix values
-#                     numbers = re.findall(r"[-+]?\d*\.\d+|\d+", value)
-#                     numbers = list(map(float, numbers))
-#                     size = int(len(numbers) / 2)  # Assuming a 2x2 matrix
-#                     value = np.array(numbers).reshape(size, 2)
-                
-#                 parsed_dict[key] = value
-
-#             row_results.append(parsed_dict)
-        
-#         results.append(row_results)
-
-#     return results
+    try:
+        return ast.literal_eval(cell)
+    except Exception as e:
+        print(f"Could not parse cell: {e}")
+        return {}
 
 
 def convert_results_df(results_df):
-    results = []
+    parsed_results = []
 
-    for row_idx in range(results_df.shape[0]):  # Iterate over rows
-        row_results = []
-        
-        for col_idx in range(results_df.shape[1]):  # Iterate over columns
-            cell = results_df.iloc[row_idx, col_idx]
-            
-            # Step 1: Split and clean the data
-            mappings = cell.replace('{', '').replace('}', '').split(',')
+    for row_idx in range(results_df.shape[0]):
+        row = []
+        for col_idx in range(results_df.shape[1]):
+            raw_cell = results_df.iloc[row_idx, col_idx]
+            parsed_cell = clean_and_parse_cell(raw_cell)
+            row.append(parsed_cell)
+        parsed_results.append(row)
 
-            # Step 2: Fix split confusion matrix values
-            fixed_mappings = []
-            inside_conf_matrix = False
-            conf_matrix_parts = []
-
-            for item in mappings:
-                item = item.strip()
-                
-                if "Confusion matrix" in item:  
-                    inside_conf_matrix = True
-                    conf_matrix_parts.append(item)
-                elif inside_conf_matrix:
-                    conf_matrix_parts.append(item)
-                    if "]]" in item:
-                        inside_conf_matrix = False
-                        fixed_mappings.append(" ".join(conf_matrix_parts))
-                        conf_matrix_parts = []
-                else:
-                    fixed_mappings.append(item)
-
-            # Step 3: Convert fixed mappings into a dictionary
-            parsed_dict = {}
-            for pair in fixed_mappings:
-                if ':' not in pair:
-                    continue  # Skip bad splits
-                key, value = pair.split(":", 1)
-                key = key.strip().strip("'")
-                value = value.strip()
-
-                # Convert numerical values
-                if value.startswith("np.float64("):
-                    value = float(value.replace("np.float64(", "").replace(")", ""))
-                elif "array([" in value:
-                    numbers = re.findall(r"[-+]?\d*\.\d+|\d+", value)
-                    numbers = list(map(float, numbers))
-                    size = int(len(numbers) / 2)
-                    value = np.array(numbers).reshape(size, 2)
-                else:
-                    # Try to cast to float if it's a normal number
-                    try:
-                        value = float(value)
-                    except ValueError:
-                        pass  # If it fails, leave it as string (e.g., labels)
-
-                parsed_dict[key] = value
-
-            row_results.append(parsed_dict)
-        
-        results.append(row_results)
-
-    return results
+    return parsed_results
 
 
 def plot_metric_trend_with_mean(results_df, metric_column, y_label, smooth_method='moving_avg', window_size=5, y_range=None):
@@ -282,7 +185,7 @@ def plot_metric_trend_with_mean(results_df, metric_column, y_label, smooth_metho
     all_res = []  # Store all particle values per iteration
 
     for j in range(len(results[0])):  # Iterate over particles
-        res = [results[i][j][metric_column] for i in range(len(results))]  # Extract metric values
+        res = [np.mean(results[i][j][metric_column]) for i in range(len(results))]  # Extract metric values
         all_res.append(res)
         plt.plot(res, alpha=0.6, linewidth=0.5)  # Plot all particles
 
@@ -322,7 +225,7 @@ def plot_global_best_trend(results_df, metric_column, y_label):
 
     plt.figure(figsize=(50, 20))  # Adjust figure size
 
-    best_res = [min([results[i][j][metric_column] for j in range(len(results[i]))]) for i in range(len(results))]  # Extract best metric values
+    best_res = [min([np.mean(results[i][j][metric_column]) for j in range(len(results[i]))]) for i in range(len(results))]  # Extract best metric values
     
     # smooth_trend = pd.Series(best_res).rolling(window=5, center=True).mean()
 
@@ -341,7 +244,7 @@ def plot_global_best_so_far(results_df, metric_column, y_label):
 
     plt.figure(figsize=(50, 20))  # Adjust figure size
 
-    best_res = [min([results[i][j][metric_column] for j in range(len(results[i]))]) for i in range(len(results))]  # Extract best metric values
+    best_res = [min([np.mean(results[i][j][metric_column]) for j in range(len(results[i]))]) for i in range(len(results))]  # Extract best metric values
 
     # Compute the global best found so far
     global_best_so_far = [best_res[0]]  # Initialize with the first value
