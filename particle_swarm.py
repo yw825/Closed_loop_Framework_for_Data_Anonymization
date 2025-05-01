@@ -20,6 +20,8 @@ import gc
 import itertools
 from sklearn.utils import resample
 from collections import defaultdict
+from sklearn.base import clone
+import copy
 
 
 from constants import *
@@ -381,6 +383,14 @@ def run_particle_swarm_experiment(df, models, param_combinations, NQIs, CQIs, n_
             fp_score = np.zeros((n_population, n_bootstrap))
             fn_score = np.zeros((n_population, n_bootstrap))
 
+            # accuracy_score = np.zeros(n_population)
+            # precision_score = np.zeros(n_population)
+            # recall_score = np.zeros(n_population)
+            # f1_score = np.zeros(n_population)
+            # auc_score = np.zeros(n_population)
+            # loss_score = np.zeros(n_population)
+            
+
             # Initialize best solutions
             global_best_fit = float('inf')
             pbest_fit = np.full(n_population, np.inf)
@@ -401,7 +411,7 @@ def run_particle_swarm_experiment(df, models, param_combinations, NQIs, CQIs, n_
                     # Generate anonymized data
                     # anonymized_df = get_anonymized_data(df, CQIs, NQIs, particles[i], gamma)
                     anonymized_df, violating_records, tracking_info = get_adaptive_anonymized_data(df, CQIs, NQIs, particles[i], gamma, k_val)
-                    # print(violating_records)
+                    # print(f"Iteration {iteration}, Particle {i}: Data hash = {hash(pd.util.hash_pandas_object(anonymized_df).sum())}")
 
                     # Check k-anonymity constraint
                     # k_anonymity = calculate_k_constraint(anonymized_df, k_val, n_cluster_val)
@@ -411,9 +421,11 @@ def run_particle_swarm_experiment(df, models, param_combinations, NQIs, CQIs, n_
                     anonymized_df_encoded = utils.encode_categorical_from_file(anonymized_df)
 
                     # Train ML model and get evaluation metrics
-                    accuracies, precisions, recalls, f1_scores, aucs, losses, tps, tns, fps, fns = model_train.train_model_bootstrap(
-                        anonymized_df_encoded, name, model, n_bootstrap
+                    accuracies, precisions, recalls, f1_scores, aucs, losses, tps, tns, fps, fns  = model_train.train_model_bootstrap(
+                        anonymized_df_encoded, name, clone(model), n_bootstrap
                     )
+                    # tps, tns, fps, fns
+                    
 
                     accuracy_score[i] = accuracies
                     precision_score[i] = precisions
@@ -425,11 +437,15 @@ def run_particle_swarm_experiment(df, models, param_combinations, NQIs, CQIs, n_
                     tn_score[i] = tns
                     fp_score[i] = fps
                     fn_score[i] = fns
+                    # print(f"Iteration {iteration}, Particle {i}: Losses = {loss_score[i]}")
+
+                    # del accuracies, precisions, recalls, f1_scores, aucs, losses, tps, tns, fps, fns
 
                     iteration_info.append({
                         "ML model": name,
                         "Iteration": iteration,
                         "Particle": i,
+                        "Particle centroid": particles[i],
                         "Accuracy": accuracy_score[i],
                         "Precision": precision_score[i],
                         "Recall": recall_score[i],
@@ -442,11 +458,14 @@ def run_particle_swarm_experiment(df, models, param_combinations, NQIs, CQIs, n_
                         "FN": fn_score[i],
                         **tracking_info 
                     })
+                    # print(f"In iteration_info, Iteration {iteration} Particel {i} results: {iteration_info[-1]['Entropy-Loss']}")
 
                     # Compute objective function
                     # normalized_k_violation = utils.normalize_data(k_violation[i], 0, 500)
                     excess_violation = max(0, len(violating_records) - violation_threshold)
                     penalty = penalty_weight * excess_violation
+                    # fit[i] = losses + penalty
+                    # print('Maximum loss score:', np.max(loss_score[i]))
                     fit[i] = np.max(loss_score[i]) + penalty
                     # fit[i] = np.mean(loss_score[i]) + penalty
 
@@ -455,7 +474,13 @@ def run_particle_swarm_experiment(df, models, param_combinations, NQIs, CQIs, n_
                         pbest_fit[i] = fit[i]
                         pbest[i] = particles[i]
 
-                results.append(iteration_info)
+                results.append(copy.deepcopy(iteration_info))
+
+                # for a in range(len(results)):
+                #     print(f"In results, Iteration {a}:")
+                #     for entry in results[a]:
+                #         print(f"Particle {entry['Particle']}: Entropy-Loss = {entry['Entropy-Loss']}")
+
 
                 # Update global best
                 if global_best_fit > min(fit):
