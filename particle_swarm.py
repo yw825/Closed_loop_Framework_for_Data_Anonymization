@@ -353,7 +353,7 @@ def update_particles_velocity_and_location(particles, n_population, centv, pbest
 def run_particle_swarm_experiment(df, name, model, gamma, k_val, n_cluster_val,
                                   initial_violation_threshold, violation_decay_rate, penalty_weight,
                                   NQIs, CQIs, n_population, maxIter, n_bootstrap,
-                                  bounds, levels, nqi_means, filedirectory):
+                                  bounds, levels, nqi_means, filedirectory,aggregate_function=None):
 
     # Initialize storage for results
     results = []
@@ -449,7 +449,12 @@ def run_particle_swarm_experiment(df, name, model, gamma, k_val, n_cluster_val,
             penalty = penalty_weight * excess_violation
             # fit[i] = losses + penalty
             # print('Maximum loss score:', np.max(loss_score[i]))
-            fit[i] = np.max(loss_score[i]) + penalty
+            if aggregate_function == 'mean':
+                fit[i] = np.mean(loss_score[i]) + penalty
+            elif aggregate_function == 'max':
+                fit[i] = np.max(loss_score[i]) + penalty
+            else:
+                raise ValueError(f"Unknown aggregate function: {aggregate_function}")
             # fit[i] = np.mean(loss_score[i]) + penalty
 
             # Update personal best

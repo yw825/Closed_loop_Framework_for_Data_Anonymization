@@ -330,7 +330,7 @@ def plot_global_best_so_far(results_df, metric_column, y_label,
     plt.xticks(ticks=tick_positions, labels=tick_labels, fontsize=50)
 
     plt.tick_params(axis='both', labelsize=50)
-    plt.legend(fontsize=50)
+    plt.legend(loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=1, fontsize=50, frameon=False)
     plt.show()
 
 def plot_global_best_so_far_combined(results_df, 
@@ -359,7 +359,7 @@ def plot_global_best_so_far_combined(results_df,
 
     plt.xticks(ticks=tick_positions, labels=tick_labels, fontsize=50)
     plt.tick_params(axis='both', labelsize=50)
-    plt.legend(fontsize=50)
+    plt.legend(loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=2, fontsize=50, frameon=False)
     plt.show()
 
 
@@ -374,6 +374,58 @@ def extract_info_from_filename(filename, pattern):
     else:
         return None
 
+
+
+def summarize_global_best_across_files(folder_path, pattern, metric_column, agg_func='max'):
+    summary = []
+
+    for file in os.listdir(folder_path):
+        if file.endswith('.csv'):
+            info = extract_info_from_filename(file, pattern)
+            if info:
+                file_path = os.path.join(folder_path, file)
+                results_df = pd.read_csv(file_path)
+                best_so_far = compute_best_so_far(results_df, metric_column, agg_func)
+                global_best = min(best_so_far)
+
+                summary.append({
+                    'k': info['k'],
+                    'n_cluster': info['n_cluster'],
+                    'model': info['model'],
+                    'global_best': global_best
+                })
+
+    return pd.DataFrame(summary)
+
+
+def plot_model_performance(summary_df, baseline_dict):
+    models = summary_df['model'].unique()
+
+    for model in models:
+
+        print(f"Plotting for model: {model}")
+
+        df_model = summary_df[summary_df['model'] == model]
+
+        # Sort by n_cluster to ensure proper line plotting
+        df_model = df_model.sort_values(by='n_cluster')
+
+        plt.figure(figsize=(50, 20))
+        plt.plot(df_model['n_cluster'], df_model['global_best'], marker='o', markersize=20, label='Global Best', color='blue', linewidth=10)
+
+        baseline = baseline_dict.get(model)
+        if baseline is not None:
+            plt.axhline(y=baseline, color='red', linestyle='--', label='Baseline',linewidth=10)
+
+        # plt.title(f'Model: {model}', fontsize=50)
+        plt.xlabel('Number of Clusters', fontsize=50)
+        plt.ylabel('Global Best', fontsize=50)
+        plt.tick_params(axis='both', labelsize=50)
+        plt.legend(loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=2, fontsize=50, frameon=False)
+        plt.grid(True)
+        plt.xticks(df_model['n_cluster'].unique())
+        plt.tight_layout()
+        plt.show()
 
 
 # def plot_metric_trend_for_each_particle(results_df, metric_column, y_label, smooth_method='moving_avg', window_size=5, y_range=None):
