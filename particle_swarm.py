@@ -350,167 +350,150 @@ def update_particles_velocity_and_location(particles, n_population, centv, pbest
 
 
 
-def run_particle_swarm_experiment(df, models, param_combinations, NQIs, CQIs, n_population, 
-                                  maxIter,n_bootstrap, bounds, levels, nqi_means, filedirectory):
+def run_particle_swarm_experiment(df, name, model, gamma, k_val, n_cluster_val,
+                                  initial_violation_threshold, violation_decay_rate, penalty_weight,
+                                  NQIs, CQIs, n_population, maxIter, n_bootstrap,
+                                  bounds, levels, nqi_means, filedirectory):
 
-    # all_results = []
+    # Initialize storage for results
+    results = []
 
-    for param_comb in param_combinations:
-        # Unpack parameters
-        gamma, k_val, n_cluster_val, initial_violation_threshold, violation_decay_rate, penalty_weight = param_comb
+    # Initialize variables
+    centv = np.zeros((n_population, n_cluster_val, len(NQIs) + len(CQIs)), dtype=object)
+    fit = np.zeros(n_population)
+    # k_violation = np.zeros(n_population)
 
-        print(f"Running with k = {k_val}, n_cluster = {n_cluster_val},  initial_violation_threshold = {initial_violation_threshold}, violation_decay_rate = {violation_decay_rate}, penalty_weight = {penalty_weight}")
+    accuracy_score = np.zeros((n_population, n_bootstrap))
+    precision_score = np.zeros((n_population, n_bootstrap))
+    recall_score = np.zeros((n_population, n_bootstrap))
+    f1_score = np.zeros((n_population, n_bootstrap))
+    auc_score = np.zeros((n_population, n_bootstrap))
+    loss_score = np.zeros((n_population, n_bootstrap))
+    tp_score = np.zeros((n_population, n_bootstrap))
+    tn_score = np.zeros((n_population, n_bootstrap))
+    fp_score = np.zeros((n_population, n_bootstrap))
+    fn_score = np.zeros((n_population, n_bootstrap))
+    
 
-        for name, model in models:
-            print(f"Training model: {name}")
+    # Initialize best solutions
+    global_best_fit = float('inf')
+    pbest_fit = np.full(n_population, np.inf)
+    pbest = np.zeros((n_population, n_cluster_val, len(NQIs) + len(CQIs)), dtype=object)
 
-            # Initialize storage for results
-            results = []
+    # Initialize particles
+    particles = initialize_particles(n_population, NQIs, CQIs, bounds, df, n_cluster_val)
 
-            # Clean all memory before each model loop
-            centv = np.zeros((n_population, n_cluster_val, len(NQIs) + len(CQIs)), dtype=object)
-            fit = np.zeros(n_population)
-            k_violation = np.zeros(n_population)
+    for iteration in range(maxIter):
 
-            accuracy_score = np.zeros((n_population, n_bootstrap))
-            precision_score = np.zeros((n_population, n_bootstrap))
-            recall_score = np.zeros((n_population, n_bootstrap))
-            f1_score = np.zeros((n_population, n_bootstrap))
-            auc_score = np.zeros((n_population, n_bootstrap))
-            loss_score = np.zeros((n_population, n_bootstrap))
-            tp_score = np.zeros((n_population, n_bootstrap))
-            tn_score = np.zeros((n_population, n_bootstrap))
-            fp_score = np.zeros((n_population, n_bootstrap))
-            fn_score = np.zeros((n_population, n_bootstrap))
+        print(f"Iteration: {iteration}")
+        iteration_info = []
 
-            # accuracy_score = np.zeros(n_population)
-            # precision_score = np.zeros(n_population)
-            # recall_score = np.zeros(n_population)
-            # f1_score = np.zeros(n_population)
-            # auc_score = np.zeros(n_population)
-            # loss_score = np.zeros(n_population)
-            
+        # Update violation threshold
+        violation_threshold = max(initial_violation_threshold - iteration * violation_decay_rate, 0)
 
-            # Initialize best solutions
-            global_best_fit = float('inf')
-            pbest_fit = np.full(n_population, np.inf)
-            pbest = np.zeros((n_population, n_cluster_val, len(NQIs) + len(CQIs)), dtype=object)
+        for i in range(n_population):
+            # Generate anonymized data
+            # anonymized_df = get_anonymized_data(df, CQIs, NQIs, particles[i], gamma)
+            anonymized_df, violating_records, tracking_info = get_adaptive_anonymized_data(df, CQIs, NQIs, particles[i], gamma, k_val)
+            # print(f"Iteration {iteration}, Particle {i}: Data hash = {hash(pd.util.hash_pandas_object(anonymized_df).sum())}")
 
-            # Initialize particles
-            particles = initialize_particles(n_population, NQIs, CQIs, bounds, df, n_cluster_val)
+            # Check k-anonymity constraint
+            # k_anonymity = calculate_k_constraint(anonymized_df, k_val, n_cluster_val)
+            # k_violation[i] = len(violating_records)
 
-            for iteration in range(maxIter):
+            # Encode categorical variables
+            anonymized_df_encoded = utils.encode_categorical_from_file(anonymized_df)
 
-                print(f"Iteration: {iteration}")
-                iteration_info = []
+            # Train ML model and get evaluation metrics
+            accuracies, precisions, recalls, f1_scores, aucs, losses, tps, tns, fps, fns  = model_train.train_model_bootstrap(
+                anonymized_df_encoded, name, clone(model), n_bootstrap
+            )
+            # tps, tns, fps, fns           
 
-                # Update violation threshold
-                violation_threshold = max(initial_violation_threshold - iteration * violation_decay_rate, 0)
+            accuracy_score[i] = accuracies
+            precision_score[i] = precisions
+            recall_score[i] = recalls
+            f1_score[i] = f1_scores
+            auc_score[i] = aucs
+            loss_score[i] = losses
+            tp_score[i] = tps
+            tn_score[i] = tns
+            fp_score[i] = fps
+            fn_score[i] = fns
+            # print(f"Iteration {iteration}, Particle {i}: Losses = {loss_score[i]}")
 
-                for i in range(n_population):
-                    # Generate anonymized data
-                    # anonymized_df = get_anonymized_data(df, CQIs, NQIs, particles[i], gamma)
-                    anonymized_df, violating_records, tracking_info = get_adaptive_anonymized_data(df, CQIs, NQIs, particles[i], gamma, k_val)
-                    # print(f"Iteration {iteration}, Particle {i}: Data hash = {hash(pd.util.hash_pandas_object(anonymized_df).sum())}")
+            # del accuracies, precisions, recalls, f1_scores, aucs, losses, tps, tns, fps, fns
 
-                    # Check k-anonymity constraint
-                    # k_anonymity = calculate_k_constraint(anonymized_df, k_val, n_cluster_val)
-                    k_violation[i] = len(violating_records)
+            iteration_info.append({
+                "ML model": name,
+                "Iteration": iteration,
+                "Particle": i,
+                "Particle centroid": particles[i],
+                "Accuracy": accuracy_score[i],
+                "Precision": precision_score[i],
+                "Recall": recall_score[i],
+                "F1 score": f1_score[i],
+                "AUC": auc_score[i],
+                "Entropy-Loss": loss_score[i],
+                "TP": tp_score[i],
+                "TN": tn_score[i],
+                "FP": fp_score[i],
+                "FN": fn_score[i],
+                **tracking_info 
+            })
+            # print(f"In iteration_info, Iteration {iteration} Particel {i} results: {iteration_info[-1]['Entropy-Loss']}")
 
-                    # Encode categorical variables
-                    anonymized_df_encoded = utils.encode_categorical_from_file(anonymized_df)
+            # Compute objective function
+            # normalized_k_violation = utils.normalize_data(k_violation[i], 0, 500)
+            excess_violation = max(0, len(violating_records) - violation_threshold)
+            penalty = penalty_weight * excess_violation
+            # fit[i] = losses + penalty
+            # print('Maximum loss score:', np.max(loss_score[i]))
+            fit[i] = np.max(loss_score[i]) + penalty
+            # fit[i] = np.mean(loss_score[i]) + penalty
 
-                    # Train ML model and get evaluation metrics
-                    accuracies, precisions, recalls, f1_scores, aucs, losses, tps, tns, fps, fns  = model_train.train_model_bootstrap(
-                        anonymized_df_encoded, name, clone(model), n_bootstrap
-                    )
-                    # tps, tns, fps, fns
-                    
+            # Update personal best
+            if fit[i] < pbest_fit[i]:
+                pbest_fit[i] = fit[i]
+                pbest[i] = particles[i]
 
-                    accuracy_score[i] = accuracies
-                    precision_score[i] = precisions
-                    recall_score[i] = recalls
-                    f1_score[i] = f1_scores
-                    auc_score[i] = aucs
-                    loss_score[i] = losses
-                    tp_score[i] = tps
-                    tn_score[i] = tns
-                    fp_score[i] = fps
-                    fn_score[i] = fns
-                    # print(f"Iteration {iteration}, Particle {i}: Losses = {loss_score[i]}")
+        results.append(copy.deepcopy(iteration_info))
 
-                    # del accuracies, precisions, recalls, f1_scores, aucs, losses, tps, tns, fps, fns
-
-                    iteration_info.append({
-                        "ML model": name,
-                        "Iteration": iteration,
-                        "Particle": i,
-                        "Particle centroid": particles[i],
-                        "Accuracy": accuracy_score[i],
-                        "Precision": precision_score[i],
-                        "Recall": recall_score[i],
-                        "F1 score": f1_score[i],
-                        "AUC": auc_score[i],
-                        "Entropy-Loss": loss_score[i],
-                        "TP": tp_score[i],
-                        "TN": tn_score[i],
-                        "FP": fp_score[i],
-                        "FN": fn_score[i],
-                        **tracking_info 
-                    })
-                    # print(f"In iteration_info, Iteration {iteration} Particel {i} results: {iteration_info[-1]['Entropy-Loss']}")
-
-                    # Compute objective function
-                    # normalized_k_violation = utils.normalize_data(k_violation[i], 0, 500)
-                    excess_violation = max(0, len(violating_records) - violation_threshold)
-                    penalty = penalty_weight * excess_violation
-                    # fit[i] = losses + penalty
-                    # print('Maximum loss score:', np.max(loss_score[i]))
-                    fit[i] = np.max(loss_score[i]) + penalty
-                    # fit[i] = np.mean(loss_score[i]) + penalty
-
-                    # Update personal best
-                    if fit[i] < pbest_fit[i]:
-                        pbest_fit[i] = fit[i]
-                        pbest[i] = particles[i]
-
-                results.append(copy.deepcopy(iteration_info))
-
-                # for a in range(len(results)):
-                #     print(f"In results, Iteration {a}:")
-                #     for entry in results[a]:
-                #         print(f"Particle {entry['Particle']}: Entropy-Loss = {entry['Entropy-Loss']}")
+        # for a in range(len(results)):
+        #     print(f"In results, Iteration {a}:")
+        #     for entry in results[a]:
+        #         print(f"Particle {entry['Particle']}: Entropy-Loss = {entry['Entropy-Loss']}")
 
 
-                # Update global best
-                if global_best_fit > min(fit):
-                    global_best_fit = min(fit)
-                    global_best = particles[np.argmin(fit)]
+        # Update global best
+        if global_best_fit > min(fit):
+            global_best_fit = min(fit)
+            global_best = particles[np.argmin(fit)]
 
-                # Update particles
-                particles, centv = update_particles_velocity_and_location(
-                    particles, n_population, centv, pbest, global_best, NQIs, CQIs, levels, bounds, nqi_means
-                )
+        # Update particles
+        particles, centv = update_particles_velocity_and_location(
+            particles, n_population, centv, pbest, global_best, NQIs, CQIs, levels, bounds, nqi_means
+        )
 
-            # Save the best anonymized dataset
-            best_anonymized_df = get_adaptive_anonymized_data(df, CQIs, NQIs, global_best, gamma, k_val)[0]
+    # Save the best anonymized dataset
+    best_anonymized_df = get_adaptive_anonymized_data(df, CQIs, NQIs, global_best, gamma, k_val)[0]
 
-            filename = f"best_anonymized_df_k{k_val}_ncluster{n_cluster_val}.csv"
-            filepath = os.path.join(filedirectory, filename)
-            best_anonymized_df.to_csv(filepath, index=False)
+    filename = f"best_anonymized_df_k{k_val}_ncluster{n_cluster_val}_{name}.csv"
+    filepath = os.path.join(filedirectory, filename)
+    best_anonymized_df.to_csv(filepath, index=False)
 
-            print(f"Saved the best anonymized data to {filepath}")
+    print(f"Saved the best anonymized data to {filepath}")
 
-            # all_results.append(results)
+    # all_results.append(results)
 
-            # Clean up memory
-            del particles, centv, fit, k_violation, pbest, pbest_fit, global_best_fit, global_best
-            del accuracy_score, precision_score, recall_score, f1_score, auc_score, loss_score, tp_score, tn_score, fp_score, fn_score
-            # del anonymized_df, anonymized_df_encoded
-            # del iteration_info, results
-            # del best_anonymized_df
-            # del filename, filepath
-            # Run garbage collection to free up memory
-            gc.collect()
+    # Clean up memory
+    del particles, centv, fit, pbest, pbest_fit, global_best_fit, global_best
+    del accuracy_score, precision_score, recall_score, f1_score, auc_score, loss_score, tp_score, tn_score, fp_score, fn_score
+    # del anonymized_df, anonymized_df_encoded
+    # del iteration_info, results
+    # del best_anonymized_df
+    # del filename, filepath
+    # Run garbage collection to free up memory
+    gc.collect()
 
     return results # all_results

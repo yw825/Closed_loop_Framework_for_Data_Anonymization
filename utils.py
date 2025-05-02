@@ -363,6 +363,19 @@ def plot_global_best_so_far_combined(results_df,
     plt.show()
 
 
+def extract_info_from_filename(filename, pattern):
+    match = re.match(pattern, filename)
+    if match:
+        return {
+            'k': int(match.group(1)),
+            'n_cluster': int(match.group(2)),
+            'model': match.group(3)
+        }
+    else:
+        return None
+
+
+
 # def plot_metric_trend_for_each_particle(results_df, metric_column, y_label, smooth_method='moving_avg', window_size=5, y_range=None):
 #     results = convert_results_df(results_df)  # Convert results
 
