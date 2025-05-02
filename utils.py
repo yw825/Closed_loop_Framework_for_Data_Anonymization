@@ -307,7 +307,7 @@ def plot_global_best_trend(results_df, metric_column, y_label,
     plt.show()
 
 def plot_global_best_so_far(results_df, metric_column, y_label, 
-                            agg_func='max', y_range=None):
+                            agg_func='max', y_range=None, output_path=None,show_plot=True):
 
     # Compute cumulative best-so-far trend
     global_best_so_far = compute_best_so_far(results_df, metric_column, agg_func)
@@ -331,13 +331,21 @@ def plot_global_best_so_far(results_df, metric_column, y_label,
 
     plt.tick_params(axis='both', labelsize=50)
     plt.legend(loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=1, fontsize=50, frameon=False)
-    plt.show()
+    
+    # Optional: Save the plot if output_path is provided
+    if output_path:
+        plt.savefig(output_path, bbox_inches='tight')
+    if show_plot:
+        plt.show()
+    else:
+        plt.close()
 
 def plot_global_best_so_far_combined(results_df, 
                                      metric_column_1, label_1, 
                                      metric_column_2, label_2, 
                                      agg_func='max', y_range=None, 
-                                     color_1='red', color_2='blue'):
+                                     color_1='red', color_2='blue', output_path=None,
+                                     show_plot=True):
     # Compute both trends
     trend_1 = compute_best_so_far(results_df, metric_column_1, agg_func)
     trend_2 = compute_best_so_far(results_df, metric_column_2, agg_func)
@@ -360,7 +368,14 @@ def plot_global_best_so_far_combined(results_df,
     plt.xticks(ticks=tick_positions, labels=tick_labels, fontsize=50)
     plt.tick_params(axis='both', labelsize=50)
     plt.legend(loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=2, fontsize=50, frameon=False)
-    plt.show()
+    
+    # Optional: Save the plot if output_path is provided
+    if output_path:
+        plt.savefig(output_path, bbox_inches='tight')
+    if show_plot:
+        plt.show()
+    else:
+        plt.close()
 
 
 def extract_info_from_filename(filename, pattern):
@@ -398,7 +413,8 @@ def summarize_global_best_across_files(folder_path, pattern, metric_column, agg_
     return pd.DataFrame(summary)
 
 
-def plot_model_performance(summary_df, baseline_dict):
+def plot_model_performance(summary_df, baseline_dict, output_path=None,show_plot=True):
+
     models = summary_df['model'].unique()
 
     for model in models:
@@ -411,7 +427,7 @@ def plot_model_performance(summary_df, baseline_dict):
         df_model = df_model.sort_values(by='n_cluster')
 
         plt.figure(figsize=(50, 20))
-        plt.plot(df_model['n_cluster'], df_model['global_best'], marker='o', markersize=20, label='Global Best', color='blue', linewidth=10)
+        plt.plot(df_model['n_cluster'], df_model['global_best'], marker='o', markersize=20, label='Proposed model', color='blue', linewidth=10)
 
         baseline = baseline_dict.get(model)
         if baseline is not None:
@@ -419,13 +435,53 @@ def plot_model_performance(summary_df, baseline_dict):
 
         # plt.title(f'Model: {model}', fontsize=50)
         plt.xlabel('Number of Clusters', fontsize=50)
-        plt.ylabel('Global Best', fontsize=50)
+        plt.ylabel('Loss Values', fontsize=50)
         plt.tick_params(axis='both', labelsize=50)
         plt.legend(loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=2, fontsize=50, frameon=False)
         plt.grid(True)
         plt.xticks(df_model['n_cluster'].unique())
         plt.tight_layout()
-        plt.show()
+        
+        # Optional: Save the plot if output_path is provided
+        if output_path:
+            # Create plot filenames
+            filename = f"{model}_n_cluster_vs_global_best_loss.png"
+            plot_path = os.path.join(output_path, filename)
+            plt.savefig(plot_path, bbox_inches='tight')
+        if show_plot:
+            plt.show()
+        else:
+            plt.close()
+
+def get_metric_values_of_global_best_particle(results_df, metric_column, agg_func=None):
+    results = convert_results_df(results_df)
+
+    global_best_value = float('inf')
+    global_best_values = []
+
+    for iteration in results:
+        for particle in iteration:
+            if metric_column not in particle:
+                continue
+
+            values = particle[metric_column]
+
+            if agg_func == 'mean':
+                summary_val = np.mean(values)
+            elif agg_func == 'max':
+                summary_val = np.max(values)
+            else:
+                summary_val = values  # assume single value
+           
+            if isinstance(summary_val, list) or isinstance(summary_val, np.ndarray):
+                summary_val = min(summary_val)  # just in case
+
+            if summary_val < global_best_value:
+                global_best_value = summary_val
+                global_best_values = values  # capture full list of values
+
+    return global_best_values  # list or array of metric values
+
 
 
 # def plot_metric_trend_for_each_particle(results_df, metric_column, y_label, smooth_method='moving_avg', window_size=5, y_range=None):
