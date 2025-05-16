@@ -22,6 +22,7 @@ from sklearn.utils import resample
 from collections import defaultdict
 from sklearn.base import clone
 import copy
+from scipy.stats import entropy as scipy_entropy
 
 
 from constants import *
@@ -121,35 +122,324 @@ def get_min_distance(df, CQIs, NQIs, particle, gamma):
 #         "violating clusters": violating_clusters
 #     }
 
-def classify_clusters(df, k_val):
+# def classify_k_anonymity_violations(df, k_val):
+#     clusters = df.groupby('cluster')
+#     valid_clusters = {}
+#     violated_clusters = {}
+
+#     for cluster_index, cluster_data in clusters:
+#         if len(cluster_data) >= k_val:
+#             valid_clusters[cluster_index] = cluster_data
+#         else:
+#             violated_clusters[cluster_index] = cluster_data
+
+#     return valid_clusters, violated_clusters
+
+# def classify_l_diversity_violations(df, SA, l=2, check_each_sa=True, check_composite=True, composite_strict=False):
+    # clusters = df.groupby('cluster')
+    # valid_clusters = {}
+    # violated_clusters = {}
+
+    # log_l = np.log2(l)  # ℓ = 2
+
+    # for cluster_index, cluster_data in clusters:
+    #     individual_valid = True
+    #     composite_valid = True
+
+    #     # Individual SA entropy checks
+    #     if check_each_sa:
+    #         sa_entropies = cluster_data[SA].apply(entropy)
+    #         individual_valid = (sa_entropies >= log_l).all()
+
+    #     # Composite check (strict = entropy, loose = count)
+    #     if check_composite:
+    #         composite_sa = cluster_data[SA].astype(str).agg('|'.join, axis=1)
+
+    #         if composite_strict:
+    #             comp_entropy = entropy(composite_sa)
+    #             if comp_entropy < log_l:
+    #                 composite_valid = False
+    #         else:
+    #             if composite_sa.nunique() < l:
+    #                 composite_valid = False
+
+    #     # Classify
+    #     if individual_valid and composite_valid:
+    #         valid_clusters[cluster_index] = cluster_data
+    #     else:
+    #         violated_clusters[cluster_index] = cluster_data
+
+    # return valid_clusters, violated_clusters
+
+def satisfies_k_anonymity(cluster_df, k_val):
+    return len(cluster_df) >= k_val
+
+def entropy(series):
+    probs = series.value_counts(normalize=True)
+    return -np.sum(probs * np.log2(probs + 1e-12))  # add epsilon to avoid log(0)
+
+def satisfies_l_diversity(cluster_df, SA, l=2, check_each_sa=True, check_composite=True, composite_strict=False):
+    log_l = np.log2(l)
+    satisfies_l = True
+
+    if check_each_sa:
+        sa_entropies = cluster_df[SA].apply(entropy)
+        if not (sa_entropies >= log_l).all():
+            satisfies_l = False
+
+    if check_composite:
+        composite_sa = cluster_df[SA].astype(str).agg('|'.join, axis=1)
+        if composite_strict:
+            if entropy(composite_sa) < log_l:
+                satisfies_l = False
+        else:
+            if composite_sa.nunique() < l:
+                satisfies_l = False
+
+    return satisfies_l
+
+def classify_clusters(df, k_val, SA, l=2, check_each_sa=True, check_composite=True, composite_strict=False):
     clusters = df.groupby('cluster')
+
+    violates_both = {}
+    violates_k_only = {}
+    violates_l_only = {}
     valid_clusters = {}
-    violated_clusters = {}
 
     for cluster_index, cluster_data in clusters:
-        if len(cluster_data) >= k_val:
-            valid_clusters[cluster_index] = cluster_data
+        satisfies_k = satisfies_k_anonymity(cluster_data, k_val)
+        satisfies_l = satisfies_l_diversity(cluster_data, SA, l, check_each_sa, check_composite, composite_strict)
+
+        if not satisfies_k and not satisfies_l:
+            violates_both[cluster_index] = cluster_data
+        elif not satisfies_k:
+            violates_k_only[cluster_index] = cluster_data
+        elif not satisfies_l:
+            violates_l_only[cluster_index] = cluster_data
         else:
-            violated_clusters[cluster_index] = cluster_data
+            valid_clusters[cluster_index] = cluster_data
 
-    return valid_clusters, violated_clusters
+    return violates_both, violates_k_only, violates_l_only, valid_clusters
 
-def split_valid_clusters(valid_clusters, k_val):
+def split_valid_clusters(valid_clusters, k_val, SA, l=2, check_each_sa=True, check_composite=True, composite_strict=False):
     retained_records = []
     excess_pool = []
 
     for idx, cluster_data in valid_clusters.items():
-        retained = cluster_data.sample(n=k_val, random_state=42)
-        excess = cluster_data.drop(retained.index)
+        cluster_data = cluster_data.copy()
+        found_valid_subset = False
 
-        retained_records.append(retained)
-        excess_pool.append(excess)
+        # Try all possible sizes from k to len(cluster)
+        for size in range(k_val, len(cluster_data) + 1):
+            subset = cluster_data.sample(n=size, random_state=42)
+            satisfies_l = satisfies_l_diversity(subset, SA, l, check_each_sa, check_composite, composite_strict)
 
-    return pd.concat(retained_records), pd.concat(excess_pool)
+            if satisfies_k_anonymity(subset, k_val) and satisfies_l:
+                retained_records.append(subset)
+                remaining = cluster_data.drop(subset.index)
+                excess_pool.append(remaining)
+                found_valid_subset = True
+                break
 
-# def fix_violated_clusters(violated_clusters, excess_pool, k_val):
+        if not found_valid_subset:
+            # If we couldn't find a valid subset (shouldn't happen if originally valid), retain all
+            retained_records.append(cluster_data)
+
+    # retained_df = pd.concat(retained_records, ignore_index=True)
+    # excess_df = pd.concat(excess_pool, ignore_index=True) if excess_pool else pd.DataFrame()
+
+    return retained_records, excess_pool
+
+def merge_violated_clusters(
+    violated_clusters, k_val, SA, l=2,
+    check_each_sa=True, check_composite=True, composite_strict=False
+):
+    fixed_clusters = []
+    still_violated = []
+    # Convert dictionary to list of DataFrames
+    buffer = list(violated_clusters.values())
+
+    while buffer:
+        base = buffer.pop(0)
+        # print(f"\n🔁 Starting new base cluster: {base['cluster'].iloc[0]} | Size: {len(base)}")
+        # print(base['cluster'].isna().sum(), "records have NaN cluster IDs")
+
+        while buffer:
+            next_cluster = buffer.pop(0)
+            # print(f"  ➕ Trying to merge with cluster: {next_cluster['cluster'].iloc[0]} | Size: {len(next_cluster)}")
+            # print(next_cluster['cluster'].isna().sum(), "records have NaN cluster IDs")
+            
+            combined = pd.concat([base, next_cluster], ignore_index=True)
+
+            satisfies_l = satisfies_l_diversity(
+                combined, SA, l=l,
+                check_each_sa=check_each_sa,
+                check_composite=check_composite,
+                composite_strict=composite_strict
+            )
+
+            # print(f"    🧪 Combined size: {len(combined)} | Satisfies k: {satisfies_k_anonymity(combined, k_val)}, Satisfies l: {satisfies_l}")
+
+            if satisfies_k_anonymity(combined, k_val) and satisfies_l:
+                # print("    ✅ Successfully formed valid cluster. Added to fixed_clusters.")
+                # Unify the cluster ID using the most frequent one
+                most_common_cluster_id = combined['cluster'].mode()[0]
+                combined['cluster'] = most_common_cluster_id
+                # print(combined['cluster'].isna().sum(), "records have NaN cluster IDs")
+                # print(f"    🛠 Reassigned cluster ID to: {most_common_cluster_id}")
+                fixed_clusters.append(combined)
+                break
+            else:
+                # Update base and continue trying to merge with the next one
+                base = combined
+        else:
+            # Inner loop exhausted without finding a satisfying merge
+            satisfies_l = satisfies_l_diversity(
+                base, SA, l=l,
+                check_each_sa=check_each_sa,
+                check_composite=check_composite,
+                composite_strict=composite_strict
+            )
+            if satisfies_k_anonymity(base, k_val) and satisfies_l:
+                # print("    ⚠️ Base satisfies both k and l after all merges. Added to fixed_clusters.")
+                fixed_clusters.append(base)
+            else:
+                # print("    ❌ No valid merge found. Still violated. Sent to still_violated.")
+                still_violated.append(base)
+
+    return fixed_clusters, still_violated        
+        
+def fix_still_violated_clusters(violated_clusters, excess_pool, SA, k_val):
+    fixed_cluster = []
+
+    while excess_pool:
+        base =  excess_pool.pop(0)
+        # print(f"\n🔁 Starting new excess pool cluster: {base['cluster'].iloc[0]} | Size: {len(base)}")
+
+        combined = pd.concat([violated_clusters, base], ignore_index=True)
+
+        satisfies_l = satisfies_l_diversity(
+            combined, SA, l=2,
+            check_each_sa=True, check_composite=True, composite_strict=False
+        )
+
+        # print(f"    🧪 Combined size: {len(combined)} | Satisfies k: {satisfies_k_anonymity(combined, k_val)}, Satisfies l: {satisfies_l}")
+
+        if satisfies_k_anonymity(combined, k_val) and satisfies_l:
+            # print("    ✅ Successfully formed valid cluster. Added to fixed_clusters.")
+            # Unify the cluster ID using the most frequent one
+            most_common_cluster_id = combined['cluster'].mode()[0]
+            combined['cluster'] = most_common_cluster_id
+            fixed_cluster.append(combined)
+            break
+        else:
+            # Update base and continue trying to merge with the next one
+            base = combined
+    return fixed_cluster, excess_pool  
+
+
+def fix_all_violated_clusters(violates_both, violates_k_only, violates_l_only, excess_pool, k_val, SA, l_val=2):
+    import pandas as pd
+
+    fixed_clusters_list = []
+    still_violated_list = []
+
+    # Handle violates_k_only
+    if violates_k_only:
+        # print(f"\n🔍 Merging {len(violates_k_only)} clusters violating k only")
+        fixed_k_clusters, still_violated_k = merge_violated_clusters(
+            violates_k_only, k_val, SA, l=l_val,
+            check_each_sa=True, check_composite=True, composite_strict=False
+        )
+        # print(f"✅ Fixed {len(fixed_k_clusters)} clusters | ❌ Still violated: {len(still_violated_k)}")
+        fixed_clusters_list.extend(fixed_k_clusters)
+        still_violated_list.extend(still_violated_k)
+
+    # Handle violates_l_only
+    if violates_l_only:
+        # print(f"\n🔍 Merging {len(violates_l_only)} clusters violating l only")
+        fixed_l_clusters, still_violated_l = merge_violated_clusters(
+            violates_l_only, k_val, SA, l=l_val,
+            check_each_sa=True, check_composite=True, composite_strict=False
+        )
+        # print(f"✅ Fixed {len(fixed_l_clusters)} clusters | ❌ Still violated: {len(still_violated_l)}")
+        fixed_clusters_list.extend(fixed_l_clusters)
+        still_violated_list.extend(still_violated_l)
+
+    # Handle violates_both
+    if violates_both:
+        # print(f"\n🔍 Merging {len(violates_both)} clusters violating both k and l")
+        fixed_both_clusters, still_violated_both = merge_violated_clusters(
+            violates_both, k_val, SA, l=l_val,
+            check_each_sa=True, check_composite=True, composite_strict=False
+        )
+        # print(f"✅ Fixed {len(fixed_both_clusters)} clusters | ❌ Still violated: {len(still_violated_both)}")
+        fixed_clusters_list.extend(fixed_both_clusters)
+        still_violated_list.extend(still_violated_both)
+
+    # print(f"\n🔍 fixed_clusters size before handling still violated: {sum(len(cluster) for cluster in fixed_clusters_list)}")
+    # print(f"🔍 still_violated size before handling still violated: {sum(len(cluster) for cluster in still_violated_list)}")
+
+    fixed_clusters_all = []
+    remaining_pool = []
+
+    # Handle still_violated
+    if still_violated_list:
+        still_violated = pd.concat(still_violated_list, ignore_index=True)
+        # print(f"\n⚠️ Final still_violated size: {len(still_violated)}")
+
+        # Unify the cluster ID
+        if 'cluster' in still_violated.columns:
+            # Option 1: Use the most frequent cluster ID
+            most_common_cluster_id = still_violated['cluster'].mode()[0]
+        else:
+            still_violated['cluster'] = -1
+            most_common_cluster_id = -1
+
+        still_violated['cluster'] = most_common_cluster_id
+    else:
+        still_violated = pd.DataFrame()
+
+    satisfies_l = satisfies_l_diversity(
+        still_violated, SA, l=l_val,
+        check_each_sa=True, check_composite=True, composite_strict=False
+    )
+
+    if satisfies_k_anonymity(still_violated, k_val) and satisfies_l:
+        # print("✅ All violations resolved.")
+        fixed_clusters_list.append(still_violated)
+        remaining_pool = excess_pool
+        still_violated = pd.DataFrame()
+    else:
+        # print("❌ Some violations remain. Attempting to fill with excess_df.")
+        fixed_clusters_all, remaining_pool = fix_still_violated_clusters(
+            still_violated, excess_pool, SA, k_val
+        )
+        fixed_clusters_list.extend(fixed_clusters_all)
+        still_violated = pd.DataFrame()
+
+    # # Safe to use now
+    # print(f"\n📦 Final fixed_clusters size after handling still violated: {sum(len(cluster) for cluster in fixed_clusters_all)}")
+    # print(f"\n📦 Final remaining_pool size after handling still violated: {sum(len(cluster) for cluster in remaining_pool)}")
+
+    # Concatenate lists of DataFrames into single DataFrames
+    if fixed_clusters_list:
+        fixed_clusters = pd.concat(fixed_clusters_list, ignore_index=True)
+        # print(f"\n📦 Final fixed_clusters size after handling still violated: {len(fixed_clusters)}")
+        remaining_pool = pd.concat(remaining_pool, ignore_index=True)
+        # print(f"📦 Final remaining_pool size: {len(remaining_pool)}")
+    else:
+        fixed_clusters = pd.DataFrame()
+
+    return fixed_clusters, remaining_pool, still_violated
+
+
+# def fix_violated_clusters(violates_both, violates_k_only, violates_l_only, excess_df, k_val):
 #     fixed_clusters = []
 #     violating_records = []
+
+#     if not violated_clusters:
+#         return pd.DataFrame(), excess_pool, violating_records  # Nothing to fix
 
 #     for idx, cluster_data in violated_clusters.items():
 #         n_missing = k_val - len(cluster_data)
@@ -164,43 +454,13 @@ def split_valid_clusters(valid_clusters, k_val):
 
 #             new_cluster = pd.concat([cluster_data, additional])
 #         else:
-#             # Not enough records to fix the cluster — flag it
 #             new_cluster = cluster_data
 #             violating_records.extend(cluster_data.index.tolist())
 
-#         # Ensure all records in the cluster have the correct cluster ID
 #         new_cluster['cluster'] = idx
 #         fixed_clusters.append(new_cluster)
 
 #     return pd.concat(fixed_clusters), excess_pool, violating_records
-
-def fix_violated_clusters(violated_clusters, excess_pool, k_val):
-    fixed_clusters = []
-    violating_records = []
-
-    if not violated_clusters:
-        return pd.DataFrame(), excess_pool, violating_records  # Nothing to fix
-
-    for idx, cluster_data in violated_clusters.items():
-        n_missing = k_val - len(cluster_data)
-
-        if len(excess_pool) >= n_missing:
-            additional = excess_pool.sample(n=n_missing, random_state=42)
-            excess_pool = excess_pool.drop(additional.index)
-
-            # Set the cluster ID of additional records to match the violated cluster
-            additional = additional.copy()
-            additional['cluster'] = idx
-
-            new_cluster = pd.concat([cluster_data, additional])
-        else:
-            new_cluster = cluster_data
-            violating_records.extend(cluster_data.index.tolist())
-
-        new_cluster['cluster'] = idx
-        fixed_clusters.append(new_cluster)
-
-    return pd.concat(fixed_clusters), excess_pool, violating_records
 
 
 def apply_centroids(df, particle, CQIs, NQIs):
@@ -214,7 +474,7 @@ def apply_centroids(df, particle, CQIs, NQIs):
     return pd.concat(anonymized_data)
 
 
-def get_adaptive_anonymized_data(df, CQIs, NQIs, particle, gamma, k_val):
+def get_adaptive_anonymized_data(df, CQIs, NQIs, particle, gamma, k_val, SA):
     tracking_info = {}
 
     # Assign clusters using min distance
@@ -222,35 +482,40 @@ def get_adaptive_anonymized_data(df, CQIs, NQIs, particle, gamma, k_val):
     df = df.copy()
     df['cluster'] = cluster_assignment
 
-    tracking_info["num_clusters"] = len(np.unique(cluster_assignment))
+    # tracking_info["num_clusters"] = len(np.unique(cluster_assignment))
 
     # Split into valid and violated clusters
-    valid_clusters, violated_clusters = classify_clusters(df, k_val)
-    tracking_info["num_valid_clusters"] = len(valid_clusters)
-    tracking_info["num_violated_clusters"] = len(violated_clusters)
-    tracking_info["num_violating_records_before_adjusting"] = sum(len(cluster) for cluster in violated_clusters.values())
+    violates_both, violates_k_only, violates_l_only, valid_clusters = classify_clusters(df, k_val, SA, l=2, check_each_sa=True, check_composite=True, composite_strict=False)
+    # tracking_info["num_valid_clusters"] = len(valid_clusters)
+    # tracking_info["num_violates_k_only"] = len(violates_k_only)
+    # tracking_info["num_violates_l_only"] = len(violates_l_only)
+    # tracking_info["num_violates_both"] = len(violates_both)
 
-    # Retain k from each valid cluster
-    retained, excess_pool = split_valid_clusters(valid_clusters, k_val)
+    tracking_info["num_records_valid"] = sum(len(cluster) for cluster in valid_clusters.values())
+    tracking_info["num_records_violates_k_only"] = sum(len(cluster) for cluster in violates_k_only.values())
+    tracking_info["num_records_violates_l_only"] = sum(len(cluster) for cluster in violates_l_only.values())
+    tracking_info["num_records_violates_both"] = sum(len(cluster) for cluster in violates_both.values())
+    tracking_info["total_num_violated_records_before_adjusting"] = tracking_info["num_records_violates_k_only"] + tracking_info["num_records_violates_l_only"] + tracking_info["num_records_violates_both"]
+
+    # Retain k and l from each valid cluster
+    retained, excess_pool = split_valid_clusters(valid_clusters, k_val, SA, l=2, check_each_sa=True, check_composite=True, composite_strict=False)
+    retained = pd.concat(retained, ignore_index=True)
     tracking_info["num_retained_records"] = len(retained)
-    tracking_info["num_excess_records"] = len(excess_pool)
+    # tracking_info["num_excess_records"] = sum(len(cluster) for cluster in excess_pool)
 
     # Fix violated clusters using excess pool
-    fixed, remaining_pool, violating_records = fix_violated_clusters(violated_clusters, excess_pool, k_val)
-    if fixed is not None and not fixed.empty:
-        tracking_info["num_fixed_clusters"] = len(fixed['cluster'].unique())
-    else:
-        tracking_info["num_fixed_clusters"] = 0
-    tracking_info["num_used_excess"] = tracking_info["num_excess_records"] - len(remaining_pool)
-    tracking_info["num_remaining_excess"] = len(remaining_pool)
-    tracking_info["num_unfixed_clusters"] = tracking_info["num_violated_clusters"] - tracking_info["num_fixed_clusters"]
-    tracking_info["num_total_violating_records_after_adjusting"] = len(violating_records)
+    fixed, remaining_pool, still_violated = fix_all_violated_clusters(violates_both, violates_k_only, violates_l_only, excess_pool, k_val, SA, l_val=2)
+    tracking_info["num_fixed_records"] = len(fixed) 
+    tracking_info["num_remaining_records"] = len(remaining_pool)
+    tracking_info["total_num_violated_records_after_adjusting"] = len(still_violated)
 
     # Combine everything before anonymizing
-    final_df = pd.concat([retained, fixed, remaining_pool])
-    anonymized_df = apply_centroids(final_df, particle, CQIs, NQIs)
 
-    return anonymized_df, violating_records, tracking_info
+    final_df = pd.concat([retained, fixed, remaining_pool, still_violated], ignore_index=True)
+    anonymized_df = apply_centroids(final_df, particle, CQIs, NQIs)
+    tracking_info["num_clusters"] = len(np.unique(anonymized_df['cluster']))
+
+    return anonymized_df, tracking_info, still_violated
 
 
 def initialize_particles(n_population, NQIs, CQIs, bounds, df, n_cluster):
@@ -350,10 +615,8 @@ def update_particles_velocity_and_location(particles, n_population, centv, pbest
 
 
 
-def run_particle_swarm_experiment(df, name, model, gamma, k_val, n_cluster_val,
-                                  initial_violation_threshold, violation_decay_rate, penalty_weight,
-                                  NQIs, CQIs, n_population, maxIter, n_bootstrap,
-                                  bounds, levels, nqi_means, filedirectory,aggregate_function=None):
+def run_particle_swarm_experiment(df, name, model, gamma, k_val, SA, n_cluster_val,initial_violation_threshold, violation_decay_rate, penalty_weight,
+NQIs, CQIs, n_population, maxIter, n_bootstrap, bounds, levels, nqi_means, filedirectory,aggregate_function=None):
 
     # Initialize storage for results
     results = []
@@ -394,7 +657,7 @@ def run_particle_swarm_experiment(df, name, model, gamma, k_val, n_cluster_val,
         for i in range(n_population):
             # Generate anonymized data
             # anonymized_df = get_anonymized_data(df, CQIs, NQIs, particles[i], gamma)
-            anonymized_df, violating_records, tracking_info = get_adaptive_anonymized_data(df, CQIs, NQIs, particles[i], gamma, k_val)
+            anonymized_df, tracking_info, violating_records = get_adaptive_anonymized_data(df, CQIs, NQIs, particles[i], gamma, k_val, SA)
             # print(f"Iteration {iteration}, Particle {i}: Data hash = {hash(pd.util.hash_pandas_object(anonymized_df).sum())}")
 
             # Check k-anonymity constraint
@@ -481,7 +744,7 @@ def run_particle_swarm_experiment(df, name, model, gamma, k_val, n_cluster_val,
         )
 
     # Save the best anonymized dataset
-    best_anonymized_df = get_adaptive_anonymized_data(df, CQIs, NQIs, global_best, gamma, k_val)[0]
+    best_anonymized_df = get_adaptive_anonymized_data(df, CQIs, NQIs, global_best, gamma, k_val, SA)[0]
 
     filename = f"best_anonymized_df_k{k_val}_ncluster{n_cluster_val}_{name}.csv"
     filepath = os.path.join(filedirectory, filename)
@@ -494,11 +757,55 @@ def run_particle_swarm_experiment(df, name, model, gamma, k_val, n_cluster_val,
     # Clean up memory
     del particles, centv, fit, pbest, pbest_fit, global_best_fit, global_best
     del accuracy_score, precision_score, recall_score, f1_score, auc_score, loss_score, tp_score, tn_score, fp_score, fn_score
-    # del anonymized_df, anonymized_df_encoded
-    # del iteration_info, results
-    # del best_anonymized_df
+    del anonymized_df, anonymized_df_encoded
+    del best_anonymized_df
     # del filename, filepath
     # Run garbage collection to free up memory
     gc.collect()
 
     return results # all_results
+
+
+def cluster_classification_test(df, gamma, k_val, n_cluster_val,
+                                           NQIs, CQIs, n_population, bounds, SA):
+    # Initialize particles
+    particles = initialize_particles(n_population, NQIs, CQIs, bounds, df, n_cluster_val)
+
+
+    for i in range(n_population):
+        print(f"Testing particle {i}")
+
+        # Assign clusters using min distance
+        cluster_assignment = get_min_distance(df, CQIs, NQIs, particles[i], gamma)
+        df = df.copy()
+        df['cluster'] = cluster_assignment
+
+        print(df['cluster'].isna().sum(), "records have NaN cluster IDs")
+
+        # Split into valid and violated clusters
+        violates_both, violates_k_only, violates_l_only, valid_clusters = classify_clusters(df, k_val, SA, l=2, check_each_sa=True, check_composite=True, composite_strict=False)
+
+        # # Print the number of clusters
+        # print(f"num_valid_clusters: ", len(valid_clusters))
+        # print(f"num_violates_k_only: ", len(violates_k_only))
+        # print(f"num_violates_l_only: ", len(violates_l_only))
+        # print(f"num_violates_both: ", len(violates_both))
+
+        print(f"num_records_valid: ", sum(len(cluster) for cluster in valid_clusters.values()))
+        print(f"num_records_violates_k_only: ", sum(len(cluster) for cluster in violates_k_only.values()))
+        print(f"num_records_violates_l_only: ", sum(len(cluster) for cluster in violates_l_only.values()))
+        print(f"num_records_violates_both: ", sum(len(cluster) for cluster in violates_both.values()))
+        print(f"total_num_violated_records_before_adjusting: ", sum(len(cluster) for cluster in violates_k_only.values()) + sum(len(cluster) for cluster in violates_l_only.values()) + sum(len(cluster) for cluster in violates_both.values()))
+
+        # Retain k and l from each valid cluster
+        retained, excess_pool = split_valid_clusters(valid_clusters, k_val, SA, l=2, check_each_sa=True, check_composite=True, composite_strict=False)
+        print(f"num_retained_records: ", sum(len(cluster) for cluster in retained))
+        # tracking_info["num_excess_records"] = sum(len(cluster) for cluster in excess_pool)
+
+        # Fix violated clusters using excess pool
+        fixed, remaining_pool, still_violated = fix_all_violated_clusters(violates_both, violates_k_only, violates_l_only, excess_pool, k_val, SA, l_val=2)
+        print(f"num_fixed_records: ", len(fixed))
+        print(f"num_remaining_records: ", len(remaining_pool))
+        print(f"total_num_violated_records_after_adjusting: ", len(still_violated))
+
+    return violates_both, violates_k_only, violates_l_only, valid_clusters

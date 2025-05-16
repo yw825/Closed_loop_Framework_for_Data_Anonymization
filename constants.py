@@ -29,25 +29,25 @@ from constants import *
 import particle_swarm
 
 
-# # German Credit Dataset
-# # Path to the dataset
-# path = '/Users/yusiwei/Library/CloudStorage/OneDrive-Personal/research/Third Year Paper/experiments/German Credit dataset.csv'
-# # Numeric Quasi-identifiers in the dataset
-# NQIs = ['age']
-# # Categorical Quasi-identifiers in the dataset
-# CQIs = ['personal_status','job']
-# # Sensitive Attribute in the dataset
-# SA = ['checking_status', 'savings_status']
-
-# Adult Dataset
+# German Credit Dataset
 # Path to the dataset
-path = '/Users/yusiwei/Library/CloudStorage/OneDrive-Personal/research/Third Year Paper/experiments/adult.csv'
+path = '/Users/yusiwei/Library/CloudStorage/OneDrive-Personal/research/Third Year Paper/experiments/German Credit dataset.csv'
 # Numeric Quasi-identifiers in the dataset
 NQIs = ['age']
 # Categorical Quasi-identifiers in the dataset
-CQIs = ['race', 'sex', 'marital_status']
+CQIs = ['personal_status','job']
 # Sensitive Attribute in the dataset
-SA = ['occupation']
+SAs = ['checking_status', 'savings_status']
+
+# # Adult Dataset
+# # Path to the dataset
+# path = '/Users/yusiwei/Library/CloudStorage/OneDrive-Personal/research/Third Year Paper/experiments/adult.csv'
+# # Numeric Quasi-identifiers in the dataset
+# NQIs = ['age']
+# # Categorical Quasi-identifiers in the dataset
+# CQIs = ['race', 'sex', 'marital_status']
+# # Sensitive Attribute in the dataset
+# SAs = ['occupation']
 
 # # Sepsis Patient Dataset
 # # Path to the dataset
@@ -57,4 +57,4 @@ SA = ['occupation']
 # # Categorical Quasi-identifiers in the dataset
 # CQIs = ['GenderDescription', 'RaceDescription',	'EthnicGroupDescription']
 # # Sensitive Attribute in the dataset
-# SA = ['HX_AIDS', 'HX_ALCOHOL', 'HX_ANEMDEF', 'HX_ARTH',	'HX_BLDLOSS',	 'HX_CHF',	'HX_CAD',	'HX_CHRNLUNG',	'HX_COAG',	'HX_DEPRESS',	'HX_DM',	'HX_DMCX',	'HX_DRUG',	'HX_HTN',	'HX_HYPOTHY',	'HX_LIVER',	'HX_LYMPH',	'HX_LYTES',	'HX_METS',	'HX_NEURO',	'HX_OBESE',	'HX_PARA',	'HX_PERIVASC',	'HX_PSYCH',	'HX_PULMCIRC',	'HX_RENLFAIL',	'HX_TUMOR',	'HX_ULCER',	'HX_VALVE',	'HX_WGHTLOSS']
+# SAs = ['HX_AIDS', 'HX_ALCOHOL', 'HX_ANEMDEF', 'HX_ARTH',	'HX_BLDLOSS',	 'HX_CHF',	'HX_CAD',	'HX_CHRNLUNG',	'HX_COAG',	'HX_DEPRESS',	'HX_DM',	'HX_DMCX',	'HX_DRUG',	'HX_HTN',	'HX_HYPOTHY',	'HX_LIVER',	'HX_LYMPH',	'HX_LYTES',	'HX_METS',	'HX_NEURO',	'HX_OBESE',	'HX_PARA',	'HX_PERIVASC',	'HX_PSYCH',	'HX_PULMCIRC',	'HX_RENLFAIL',	'HX_TUMOR',	'HX_ULCER',	'HX_VALVE',	'HX_WGHTLOSS']
