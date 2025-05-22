@@ -351,6 +351,7 @@ def apply_centroids(df, particle, CQIs, NQIs):
 
 
 def get_adaptive_anonymized_data(df, CQIs, NQIs, particle, gamma, k_val, SAs):
+    updated_unfixed_clusters_list = []
     tracking_info = {}
 
     # Assign clusters using min distance

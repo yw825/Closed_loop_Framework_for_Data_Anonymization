@@ -247,29 +247,68 @@ def plot_metric_trend_for_each_particle(results_df, metric_column, y_label,
     plt.show()
 
 
+# def get_best_particle_per_iteration(results_df, metric_column, agg_func='max'):
+#     results = convert_results_df(results_df)
+#     best_res = []
+
+#     for i in range(len(results)):  # Each iteration
+#         if agg_func == 'mean':
+#             best = min([np.mean(results[i][j][metric_column]) for j in range(len(results[i]))])
+#         elif agg_func == 'max':
+#             best = min([np.max(results[i][j][metric_column]) for j in range(len(results[i]))])
+#         else:
+#             best = min([results[i][j][metric_column] for j in range(len(results[i]))])
+#         best_res.append(best)
+
+#     return best_res  # length = num_iterations
+
 def get_best_particle_per_iteration(results_df, metric_column, agg_func='max'):
     results = convert_results_df(results_df)
     best_res = []
+    best_clusters = []
 
-    for i in range(len(results)):  # Each iteration
+    for iteration_particles in results:
+        # Vectorized processing using list comprehensions
         if agg_func == 'mean':
-            best = min([np.mean(results[i][j][metric_column]) for j in range(len(results[i]))])
+            metrics = [np.mean(p[metric_column]) for p in iteration_particles]
         elif agg_func == 'max':
-            best = min([np.max(results[i][j][metric_column]) for j in range(len(results[i]))])
+            metrics = [np.max(p[metric_column]) for p in iteration_particles]
         else:
-            best = min([results[i][j][metric_column] for j in range(len(results[i]))])
-        best_res.append(best)
+            metrics = [p[metric_column] for p in iteration_particles]
 
-    return best_res  # length = num_iterations
+        # Convert to NumPy array for efficient argmin
+        metrics = np.array(metrics)
+        best_idx = np.argmin(metrics)
+
+        best_res.append(metrics[best_idx])
+        best_clusters.append(iteration_particles[best_idx].get('num_clusters', None))
+
+    return best_res, best_clusters
+
+# def compute_best_so_far(results_df, metric_column, agg_func='max'):
+#     best_res = get_best_particle_per_iteration(results_df, metric_column, agg_func)
+
+#     best_so_far = [best_res[0]]
+#     for val in best_res[1:]:
+#         best_so_far.append(min(best_so_far[-1], val))
+
+#     return best_so_far
 
 def compute_best_so_far(results_df, metric_column, agg_func='max'):
-    best_res = get_best_particle_per_iteration(results_df, metric_column, agg_func)
+    best_res, best_clusters = get_best_particle_per_iteration(results_df, metric_column, agg_func)
 
-    best_so_far = [best_res[0]]
-    for val in best_res[1:]:
-        best_so_far.append(min(best_so_far[-1], val))
+    best_so_far_vals = [best_res[0]]
+    best_so_far_clusters = [best_clusters[0]]
 
-    return best_so_far
+    for i in range(1, len(best_res)):
+        if best_res[i] < best_so_far_vals[-1]:
+            best_so_far_vals.append(best_res[i])
+            best_so_far_clusters.append(best_clusters[i])
+        else:
+            best_so_far_vals.append(best_so_far_vals[-1])
+            best_so_far_clusters.append(best_so_far_clusters[-1])
+
+    return best_so_far_vals, best_so_far_clusters
 
 def plot_global_best_trend(results_df, metric_column, y_label, 
                            agg_func='max', smooth_method=None, 
@@ -391,6 +430,27 @@ def extract_info_from_filename(filename, pattern):
 
 
 
+# def summarize_global_best_across_files(folder_path, pattern, metric_column, agg_func='max'):
+#     summary = []
+
+#     for file in os.listdir(folder_path):
+#         if file.endswith('.csv'):
+#             info = extract_info_from_filename(file, pattern)
+#             if info:
+#                 file_path = os.path.join(folder_path, file)
+#                 results_df = pd.read_csv(file_path)
+#                 best_so_far = compute_best_so_far(results_df, metric_column, agg_func)
+#                 global_best = min(best_so_far)
+
+#                 summary.append({
+#                     'k': info['k'],
+#                     'n_cluster': info['n_cluster'],
+#                     'model': info['model'],
+#                     'global_best': global_best
+#                 })
+
+#     return pd.DataFrame(summary)
+
 def summarize_global_best_across_files(folder_path, pattern, metric_column, agg_func='max'):
     summary = []
 
@@ -400,14 +460,17 @@ def summarize_global_best_across_files(folder_path, pattern, metric_column, agg_
             if info:
                 file_path = os.path.join(folder_path, file)
                 results_df = pd.read_csv(file_path)
-                best_so_far = compute_best_so_far(results_df, metric_column, agg_func)
-                global_best = min(best_so_far)
+
+                best_so_far_vals, best_so_far_clusters = compute_best_so_far(results_df, metric_column, agg_func)
+                global_best = min(best_so_far_vals)
+                best_index = best_so_far_vals.index(global_best)
+                best_cluster = best_so_far_clusters[best_index]
 
                 summary.append({
                     'k': info['k'],
-                    'n_cluster': info['n_cluster'],
                     'model': info['model'],
-                    'global_best': global_best
+                    'global_best': global_best,
+                    'n_cluster': best_cluster  # From best-so-far tracking
                 })
 
     return pd.DataFrame(summary)
