@@ -535,7 +535,7 @@ def update_particles_velocity_and_location(particles, n_population, centv, pbest
 
 
 def run_particle_swarm_experiment(df, name, model, gamma, k_val, SAs, n_cluster_val,initial_violation_threshold, violation_decay_rate, penalty_weight,
-NQIs, CQIs, n_population, maxIter, n_bootstrap, bounds, levels, nqi_means, filedirectory,aggregate_function=None):
+NQIs, CQIs, n_population, maxIter, n_bootstrap, bounds, levels, nqi_means, filedirectory, current_iter, aggregate_function=None):
 
     # Initialize storage for results
     results = []
@@ -665,7 +665,7 @@ NQIs, CQIs, n_population, maxIter, n_bootstrap, bounds, levels, nqi_means, filed
     # Save the best anonymized dataset
     best_anonymized_df = get_adaptive_anonymized_data(df, CQIs, NQIs, global_best, gamma, k_val, SAs)[0]
 
-    filename = f"best_anonymized_df_k{k_val}_ncluster{n_cluster_val}_{name}.csv"
+    filename = f"best_anonymized_df_k{k_val}_ncluster{n_cluster_val}_{name}_round{current_iter}.csv"
     filepath = os.path.join(filedirectory, filename)
     best_anonymized_df.to_csv(filepath, index=False)
 

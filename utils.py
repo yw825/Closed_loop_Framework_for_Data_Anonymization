@@ -423,7 +423,8 @@ def extract_info_from_filename(filename, pattern):
         return {
             'k': int(match.group(1)),
             'n_cluster': int(match.group(2)),
-            'model': match.group(3)
+            'model': match.group(3),
+            'round': match.group(4)
         }
     else:
         return None
@@ -467,10 +468,12 @@ def summarize_global_best_across_files(folder_path, pattern, metric_column, agg_
                 best_cluster = best_so_far_clusters[best_index]
 
                 summary.append({
+                    'round': info['round'],
                     'k': info['k'],
                     'model': info['model'],
                     'global_best': global_best,
-                    'n_cluster': best_cluster  # From best-so-far tracking
+                    'n_cluster': best_cluster,  # From best-so-far tracking
+                    'n_clusters_set': info['n_cluster']  # From filename
                 })
 
     return pd.DataFrame(summary)
