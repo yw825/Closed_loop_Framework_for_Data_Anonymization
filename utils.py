@@ -349,7 +349,7 @@ def plot_global_best_so_far(results_df, metric_column, y_label,
                             agg_func='max', y_range=None, output_path=None,show_plot=True):
 
     # Compute cumulative best-so-far trend
-    global_best_so_far = compute_best_so_far(results_df, metric_column, agg_func)
+    global_best_so_far, best_so_far_clusters = compute_best_so_far(results_df, metric_column, agg_func)
 
     plt.figure(figsize=(50, 20))
     plt.plot(global_best_so_far, linewidth=10, label='Best-so-far')
@@ -386,8 +386,8 @@ def plot_global_best_so_far_combined(results_df,
                                      color_1='red', color_2='blue', output_path=None,
                                      show_plot=True):
     # Compute both trends
-    trend_1 = compute_best_so_far(results_df, metric_column_1, agg_func)
-    trend_2 = compute_best_so_far(results_df, metric_column_2, agg_func)
+    trend_1, best_so_far_clusters1 = compute_best_so_far(results_df, metric_column_1, agg_func)
+    trend_2, best_so_far_clusters2 = compute_best_so_far(results_df, metric_column_2, agg_func)
 
     plt.figure(figsize=(50, 20))
     plt.plot(trend_1, color=color_1, linewidth=10, label=label_1)
