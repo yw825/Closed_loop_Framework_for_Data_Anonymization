@@ -28,6 +28,7 @@ import gower
 from constants import *
 import utils
 import model_train
+import concurrent.futures
 
 # Function to compute numerical distance
 def get_numeric_distance(df, NQIs, particle):
@@ -87,7 +88,7 @@ def entropy(series):
     probs = series.value_counts(normalize=True)
     return -np.sum(probs * np.log2(probs + 1e-12))  # add epsilon to avoid log(0)
 
-def satisfies_l_diversity(cluster_df, SAs, l=2, check_each_sa=True, check_composite=True, composite_strict=False):
+def satisfies_l_diversity(cluster_df, SAs, l=2, check_each_sa=True, check_composite=False, composite_strict=False):
     log_l = np.log2(l)
     satisfies_l = True
     
@@ -532,7 +533,113 @@ def update_particles_velocity_and_location(particles, n_population, centv, pbest
     
     return particles, centv
 
+# def evaluate_particle(i, particles, df, CQIs, NQIs, gamma, k_val, SAs, name, model, n_bootstrap,
+#                       initial_violation_threshold, violation_decay_rate, penalty_weight,
+#                       iteration, aggregate_function, levels, bounds, nqi_means):
+#     anonymized_df, tracking_info, violating_records = get_adaptive_anonymized_data(
+#         df, CQIs, NQIs, particles[i], gamma, k_val, SAs
+#     )
+#     anonymized_df_encoded = utils.encode_categorical_from_file(anonymized_df)
 
+#     accuracies, precisions, recalls, f1_scores, aucs, losses, tps, tns, fps, fns = model_train.train_model_bootstrap(
+#         anonymized_df_encoded, name, clone(model), n_bootstrap
+#     )
+
+#     excess_violation = max(0, len(violating_records) - max(initial_violation_threshold - iteration * violation_decay_rate, 0))
+#     penalty = penalty_weight * excess_violation
+
+#     if aggregate_function == 'mean':
+#         fitness = np.mean(losses) + penalty
+#     elif aggregate_function == 'max':
+#         fitness = np.max(losses) + penalty
+#     else:
+#         raise ValueError(f"Unknown aggregate function: {aggregate_function}")
+
+#     result = {
+#         "index": i,
+#         "fitness": fitness,
+#         "particle": particles[i],
+#         "tracking_info": tracking_info,
+#         "scores": {
+#             "Accuracy": accuracies,
+#             "Precision": precisions,
+#             "Recall": recalls,
+#             "F1 score": f1_scores,
+#             "AUC": aucs,
+#             "Entropy-Loss": losses,
+#             "TP": tps,
+#             "TN": tns,
+#             "FP": fps,
+#             "FN": fns
+#         }
+#     }
+
+#     return result
+
+# def run_particle_swarm_experiment(df, name, model, gamma, k_val, SAs, n_cluster_val,
+#                                    initial_violation_threshold, violation_decay_rate, penalty_weight,
+#                                    NQIs, CQIs, n_population, maxIter, n_bootstrap,
+#                                    bounds, levels, nqi_means, filedirectory, current_iter,
+#                                    aggregate_function=None):
+
+#     results = []
+
+#     centv = np.zeros((n_population, n_cluster_val, len(NQIs) + len(CQIs)), dtype=object)
+#     fit = np.zeros(n_population)
+#     pbest_fit = np.full(n_population, np.inf)
+#     pbest = np.zeros((n_population, n_cluster_val, len(NQIs) + len(CQIs)), dtype=object)
+
+#     particles = initialize_particles(n_population, NQIs, CQIs, bounds, df, n_cluster_val)
+
+#     for iteration in range(maxIter):
+#         print(f"Iteration: {iteration}")
+#         iteration_info = []
+
+#         with concurrent.futures.ProcessPoolExecutor(max_workers=os.cpu_count()) as executor:
+#             futures = [
+#                 executor.submit(
+#                     evaluate_particle, i, particles, df, CQIs, NQIs, gamma, k_val, SAs,
+#                     name, model, n_bootstrap, initial_violation_threshold,
+#                     violation_decay_rate, penalty_weight, iteration, aggregate_function,
+#                     levels, bounds, nqi_means
+#                 ) for i in range(n_population)
+#             ]
+#             particle_results = [f.result() for f in concurrent.futures.as_completed(futures)]
+
+#         for result in particle_results:
+#             i = result['index']
+#             fit[i] = result['fitness']
+#             if fit[i] < pbest_fit[i]:
+#                 pbest_fit[i] = fit[i]
+#                 pbest[i] = result['particle']
+
+#             iteration_info.append({
+#                 "ML model": name,
+#                 "Iteration": iteration,
+#                 "Particle": i,
+#                 "Particle centroid": result['particle'],
+#                 **result['tracking_info'],
+#                 **result['scores']
+#             })
+
+#         results.append(copy.deepcopy(iteration_info))
+
+#         if np.min(fit) < np.min(pbest_fit):
+#             global_best_fit = np.min(fit)
+#             global_best = particles[np.argmin(fit)]
+
+#         particles, centv = update_particles_velocity_and_location(
+#             particles, n_population, centv, pbest, global_best, NQIs, CQIs, levels, bounds, nqi_means
+#         )
+
+#     best_anonymized_df = get_adaptive_anonymized_data(df, CQIs, NQIs, global_best, gamma, k_val, SAs)[0]
+#     filename = f"best_anonymized_df_k{k_val}_ncluster{n_cluster_val}_{name}_round{current_iter}.csv"
+#     filepath = os.path.join(filedirectory, filename)
+#     best_anonymized_df.to_csv(filepath, index=False)
+#     print(f"Saved the best anonymized data to {filepath}")
+
+#     gc.collect()
+#     return results
 
 def run_particle_swarm_experiment(df, name, model, gamma, k_val, SAs, n_cluster_val,initial_violation_threshold, violation_decay_rate, penalty_weight,
 NQIs, CQIs, n_population, maxIter, n_bootstrap, bounds, levels, nqi_means, filedirectory, current_iter, aggregate_function=None):
@@ -567,7 +674,7 @@ NQIs, CQIs, n_population, maxIter, n_bootstrap, bounds, levels, nqi_means, filed
 
     for iteration in range(maxIter):
 
-        print(f"Iteration: {iteration}")
+        # print(f"Iteration: {iteration}")
         iteration_info = []
 
         # Update violation threshold
@@ -684,6 +791,41 @@ NQIs, CQIs, n_population, maxIter, n_bootstrap, bounds, levels, nqi_means, filed
 
     return results # all_results
 
+def run_single_experiment(i, df, name, model, gamma, k_val, n_cluster_val,
+                           initial_violation_threshold, violation_decay_rate,
+                           penalty_weight, SAs, NQIs, CQIs, bounds, levels,
+                           nqi_means, base_path):
+    
+    # print(f"PSO Round: {i}")
+    results = particle_swarm.run_particle_swarm_experiment(
+        df=df, 
+        name=name,
+        model=model, 
+        gamma=gamma,
+        k_val=k_val,
+        SAs=SAs, 
+        n_cluster_val=n_cluster_val,
+        initial_violation_threshold=initial_violation_threshold,
+        violation_decay_rate=violation_decay_rate,
+        penalty_weight=penalty_weight, 
+        NQIs=NQIs, 
+        CQIs=CQIs, 
+        n_population=10,
+        maxIter=20,
+        n_bootstrap=100,
+        bounds=bounds, 
+        levels=levels, 
+        nqi_means=nqi_means, 
+        filedirectory=os.path.join(base_path, 'Anonymized Data'),
+        current_iter=i,
+        aggregate_function='mean'
+    )
+
+    results_df = pd.DataFrame(results)
+    filedirectory = os.path.join(base_path, 'Tracking Info')
+    filename = f"track_info_k{k_val}_ncluster{n_cluster_val}_{name}_round{i}.csv"
+    filename = os.path.join(filedirectory, filename)
+    results_df.to_csv(filename, index=False)
 
 def cluster_classification_test(df, gamma, k_val, n_cluster_val,
                                            NQIs, CQIs, n_population, bounds, SAs):

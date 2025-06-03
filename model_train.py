@@ -105,17 +105,17 @@ def train_model_bootstrap(df, name, model, n_bootstrap, test_size=0.2):
     #     columns_to_drop = ['SepsisFlag', 't_0.05', 't_0.075', 't_0.1', 'HomogeneityAttack', 'cluster']
     # columns_to_drop = ['SepsisFlag', 'PatientIdentifier']
 
-    # # Adult data
-    # if df.shape[1] == 97:
-    #     columns_to_drop = ['income_ >50K']
-    # else:
-    #     columns_to_drop = ['income_ >50K', 'cluster']
-
-    # German credit data
-    if df.shape[1] == 49:
-        columns_to_drop = ['credit_risk_good']
+    # Adult data
+    if df.shape[1] == 97:
+        columns_to_drop = ['income_ >50K']
     else:
-        columns_to_drop = ['credit_risk_good', 'cluster']
+        columns_to_drop = ['income_ >50K', 'cluster']
+
+    # # German credit data
+    # if df.shape[1] == 49:
+    #     columns_to_drop = ['credit_risk_good']
+    # else:
+    #     columns_to_drop = ['credit_risk_good', 'cluster']
     
 
     # Lists to store metrics
@@ -134,8 +134,8 @@ def train_model_bootstrap(df, name, model, n_bootstrap, test_size=0.2):
         # Prepare data
         X = df.drop(columns=columns_to_drop)
         # y = df["SepsisFlag"]
-        # y = df["income_ >50K"]
-        y = df["credit_risk_good"]
+        y = df["income_ >50K"]
+        # y = df["credit_risk_good"]
 
         # Train-test split
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=i)
