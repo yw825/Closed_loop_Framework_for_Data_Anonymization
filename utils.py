@@ -548,7 +548,46 @@ def get_metric_values_of_global_best_particle(results_df, metric_column, agg_fun
 
     return global_best_values  # list or array of metric values
 
+def plot_comparison_by_model(model, MO_OBAM_results, column_to_use, closed_loop_results, baseline_dict=None, output_path=None, show_plot=True):
+    print(f"Plotting comparison for model: {model}")
 
+    # Filter both DataFrames for the selected model
+    df_mo = MO_OBAM_results[MO_OBAM_results['model'] == model]
+    df_cl = closed_loop_results[closed_loop_results['model'] == model]
+
+    # Sort by n_cluster to ensure proper line plotting
+    df_mo = df_mo.sort_values(by='n_clusters_set')
+    df_cl = df_cl.sort_values(by='n_clusters_set')
+
+    # Plotting
+    plt.figure(figsize=(50, 20))
+    plt.plot(df_mo['n_clusters_set'], df_mo[column_to_use], marker='s', markersize=20, label='MO-OBAM', color='green', linewidth=10)
+    plt.plot(df_cl['n_clusters_set'], df_cl['global_best'], marker='o', markersize=20, label='Closed-Loop', color='blue', linewidth=10)
+
+    # Add baseline line if available
+    if baseline_dict:
+        baseline = baseline_dict.get(model)
+        if baseline is not None:
+            plt.axhline(y=baseline, color='red', linestyle='--', label='Baseline', linewidth=10)
+
+    plt.xlabel('Number of Clusters', fontsize=50)
+    plt.ylabel('Loss Values', fontsize=50)
+    plt.tick_params(axis='both', labelsize=50)
+    plt.legend(loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=3, fontsize=50, frameon=False)
+    plt.grid(True)
+    plt.xticks(df_cl['n_clusters_set'].unique())
+    plt.tight_layout()
+
+    # Save if requested
+    if output_path:
+        filename = f"{model}_MO_vs_CL_with_baseline_loss.png"
+        plot_path = os.path.join(output_path, filename)
+        plt.savefig(plot_path, bbox_inches='tight')
+
+    if show_plot:
+        plt.show()
+    else:
+        plt.close()
 
 # def plot_metric_trend_for_each_particle(results_df, metric_column, y_label, smooth_method='moving_avg', window_size=5, y_range=None):
 #     results = convert_results_df(results_df)  # Convert results
